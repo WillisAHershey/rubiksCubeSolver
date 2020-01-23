@@ -312,9 +312,6 @@ void* threadBuild(void *data){
   return NULL;
 }
 
-#undef done
-#undef restart
-
 typedef struct buildTreeData{
   stateTreeNode_t *node;
   stateList_t *stateList;
@@ -409,17 +406,17 @@ int main(){
   treeQueue.tail=NULL;
   sem_init(&treeQueue.turn,0,1);
   buildTreeData_t buildTreeData=(buildTreeData_t){.node=&tree,.stateList=stateList,.treeQueue=&treeQueue};
-  pthread_t pid[NUM_THREADS];
-  pthread_create(&pid[0],NULL,buildTree,&buildTreeData);
+  pthread_t pids[NUM_THREADS];
+  pthread_create(&pids[0],NULL,buildTree,&buildTreeData);
   sleep(5);
+  int c;
   if(!solutionFound){
-  	int c;
   	for(c=1;c<NUM_THREADS;++c){
 		buildTreeData.node=treeQueueRemove(&treeQueue);
-		pthread_create(&pid[c],NULL,buildTree,&buildTreeData);
+		pthread_create(&pids[c],NULL,buildTree,&buildTreeData);
 	}
   }
-  pthread_join(pid[0],NULL);
+  pthread_join(pids[0],NULL);
   freeStateList(stateList);
   sem_destroy(stateList->turn);
   sem_destroy(&treeQueue.turn);
