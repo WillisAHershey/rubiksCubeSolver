@@ -330,8 +330,8 @@ void* buildTree(void *data){
   for(c=0;c<18;++c){
 	pthread_create(&pids[c],NULL,threadBuild,(void*)&threadData);
 	sem_wait(&threadData.done);
-	volatiles[c]=(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)(volatileData_t*)threadData.volatiles;
-	volatiles[c]->state=&node->state;
+	volatiles[c]=(volatileData_t*)threadData.volatiles;
+	volatiles[c]->state=(volatile state_t*)&node->state;
 	volatiles[c]->put=(volatile stateTreeNode_t**)&node->children[c];
 	volatiles[c]->transformation=transformations[c];
 	sem_post(&volatiles[c]->restart);
