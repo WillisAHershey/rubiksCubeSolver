@@ -408,14 +408,13 @@ int main(){
   treeQueue.head=NULL;
   treeQueue.tail=NULL;
   sem_init(&treeQueue.turn,0,1);
-  printf("Building tree\n");
   buildTreeData_t buildTreeData=(buildTreeData_t){.node=&tree,.stateList=stateList,.treeQueue=&treeQueue};
   pthread_t pid[NUM_THREADS];
   pthread_create(&pid[0],NULL,buildTree,&buildTreeData);
   sleep(5);
   if(!solutionFound){
   	int c;
-  	for(c=0;c<NUM_THREADS;++c){
+  	for(c=1;c<NUM_THREADS;++c){
 		buildTreeData.node=treeQueueRemove(&treeQueue);
 		pthread_create(&pid[c],NULL,buildTree,&buildTreeData);
 	}
@@ -426,4 +425,6 @@ int main(){
   sem_destroy(&treeQueue.turn);
   searchTree(&tree);
   freeTree(&tree);
+  for(c=1;c<NUM_THREADS;++c)
+	pthread_join(pids[c],NULL);
 }
