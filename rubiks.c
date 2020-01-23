@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 
-#define NUM_THREADS 16
+#define NUM_THREADS 2000
 
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 //This allows us to convert colors directly to integer types, and it also saves memory, since we only need 3 bits
@@ -344,6 +344,13 @@ void freeTree(stateTreeNode_t *tree){
 }
 
 int main(){
+  printf("sizeof(void*)=%lu\n",sizeof(void*));
+  printf("sizeof(enum color)=%lu\n",sizeof(enum color));
+  printf("sizeof(state_t)=%lu\n",sizeof(state_t));
+  printf("sizeof(stateTreeNode_t)=%lu\n",sizeof(stateTreeNode_t));
+  printf("sizeof(treeQueue_t)=%lu\n",sizeof(treeQueue_t));
+  printf("sizeof(treeQueueNode_t)=%lu\n",sizeof(treeQueueNode_t));
+  printf("sizeof(stateList_t)=%lu\n",sizeof(stateList_t));
   stateTreeNode_t tree; //Root of the tree lives of the stack, but the rest of it is on the heap
   tree.state=shuffle(5,1);
   tree.tier=0;
