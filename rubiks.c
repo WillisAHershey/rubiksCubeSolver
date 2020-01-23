@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <semaphore.h>
 #include <pthread.h>
+#include <unistd.h>
+
+#define NUM_THREADS 800
 
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 //This allows us to convert colors directly to integer types, and it also saves memory, since we only need 3 bits
@@ -39,12 +43,12 @@ void printState(state_t *in){ //This allows us to print any given state for debu
   }
   printf("}\n");
 }
+
 //This is the solved state, the state we attempt to achieve
 state_t solved=(state_t){{white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
 
 typedef struct stateTreeNode{ //Has a pointer for all possible movements from this point and a state
   state_t state;
-  //struct stateTreeNode *faceClock,*faceCounter,*faceTwice,*leftClock,*leftCounter,*leftTwice,*rightClock,*rightCounter,*rightTwice,*rearClock,*rearCounter,*rearTwice,*topClock,*topCounter,*topTwice,*bottomClock,*bottomCounter,*bottomTwice;
   struct stateTreeNode *children[18];
 }stateTreeNode_t;
 
@@ -66,6 +70,7 @@ typedef struct stateList{ //List of states we have visited before, so none get r
 }stateList_t;
 
 //The following functions mutate the input state to simulate some specific turn of the cube and return the resulting state.
+//Pointers are used to prevent the machine from having to copy so much
 
 void faceClock(state_t *in,state_t *out){
   *out=(state_t){{in->c[5],in->c[3],in->c[0],in->c[6],in->c[1],in->c[7],in->c[4],in->c[2],in->c[40],in->c[41],in->c[42],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[32],in->c[33],in->c[34],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[8],in->c[9],in->c[10],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[16],in->c[17],in->c[18],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
@@ -96,7 +101,7 @@ void rightClock(state_t *in,state_t *out){
 }
 
 void rightCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[37],in->c[3],in->c[35],in->c[5],in->c[6],in->c[32],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[18],in->c[20],in->c[23],in->c[17],in->c[22],in->c[16],in->c[19],in->c[21],in->c[47],in->c[25],in->c[26],in->c[44],in->c[28],in->c[42],in->c[30],in->c[31],in->c[24],in->c[33],in->c[34],in->c[27],in->c[36],in->c[24],in->c[38],in->c[39],in->c[40],in->c[41],in->c[2],in->c[43],in->c[4],in->c[45],in->c[46],in->c[7]}};
+  *out=(state_t){{in->c[0],in->c[1],in->c[37],in->c[3],in->c[35],in->c[5],in->c[6],in->c[32],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[18],in->c[20],in->c[23],in->c[17],in->c[22],in->c[16],in->c[19],in->c[21],in->c[47],in->c[25],in->c[26],in->c[44],in->c[28],in->c[42],in->c[30],in->c[31],in->c[24],in->c[33],in->c[34],in->c[27],in->c[36],in->c[29],in->c[38],in->c[39],in->c[40],in->c[41],in->c[2],in->c[43],in->c[4],in->c[45],in->c[46],in->c[7]}};
 }
 
 void rightTwice(state_t *in,state_t *out){
@@ -140,6 +145,34 @@ void bottomTwice(state_t *in,state_t *out){
 }
 
 void (*transformations[])(state_t*,state_t*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
+
+char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right Twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
+
+int seed=0;
+
+state_t shuffle(int in,int verbose){
+  if(!seed)
+	srand((seed=time(NULL)));
+  int c;
+  state_t out;
+  state_t hold;
+  int r;
+  int last;
+  (transformations[(r=rand()%18)])(&solved,&out);
+  if(verbose)
+	printf("%s\n",descriptions[r]);
+  for(c=0;c<in-1;++c){
+	last=r;
+	r=rand()%15;
+	if(last/3<=r/3)
+		r+=3;
+	(transformations[r])(&out,&hold);
+	if(verbose)
+		printf("%s\n",descriptions[r]);
+	out=hold;
+  }
+  return out;
+}
 
 int compareStates(state_t *a,state_t *b){ //returns -1 if less, 1 if greater, and 0 if equal. This allows us to keep our state list in order.
   int i;
@@ -282,14 +315,19 @@ void* threadBuild(void *data){
 #undef done
 #undef restart
 
-void buildTree(stateTreeNode_t *node,stateList_t *stateList){
-  treeQueue_t treeQueue;
-  treeQueue.head=NULL;
-  treeQueue.tail=NULL;
-  sem_init(&treeQueue.turn,0,1);
+typedef struct buildTreeData{
+  stateTreeNode_t *node;
+  stateList_t *stateList;
+  treeQueue_t *treeQueue;
+}buildTreeData_t;
+
+void* buildTree(void *data){
+  stateTreeNode_t *node=((buildTreeData_t*)data)->node;
+  stateList_t *stateList=((buildTreeData_t*)data)->stateList;
+  treeQueue_t *treeQueue=((buildTreeData_t*)data)->treeQueue;
   pthread_t pids[18];
   volatileData_t *volatiles[18];
-  threadData_t threadData=(threadData_t){.stateList=stateList,.treeQueue=&treeQueue,.volatiles=NULL,};
+  threadData_t threadData=(threadData_t){.stateList=stateList,.treeQueue=treeQueue,.volatiles=NULL,};
   sem_init(&threadData.done,0,0);
   int c;
   for(c=0;c<18;++c){
@@ -301,7 +339,7 @@ void buildTree(stateTreeNode_t *node,stateList_t *stateList){
 	volatiles[c]->transformation=transformations[c];
 	sem_post(&volatiles[c]->restart);
   }
-  while(!solutionFound&&(node=treeQueueRemove(&treeQueue))){
+  while(!solutionFound&&(node=treeQueueRemove(treeQueue))){
 	for(c=0;c<18;++c){
 		sem_wait(&volatiles[c]->done);
 		volatiles[c]->state=&node->state;
@@ -315,7 +353,7 @@ void buildTree(stateTreeNode_t *node,stateList_t *stateList){
   }
   else{
 	printf("SOLUTION FOUND\n");
-  	while((node=treeQueueRemove(&treeQueue)))
+  	while((node=treeQueueRemove(treeQueue)))
 		for(c=0;c<18;++c)
 			node->children[c]=NULL;
   }
@@ -326,102 +364,21 @@ void buildTree(stateTreeNode_t *node,stateList_t *stateList){
   for(c=0;c<18;++c)
 	pthread_join(pids[c],NULL);
   sem_destroy(&threadData.done);
+  return NULL;
 }
 
 int searchTree(stateTreeNode_t *tree){
   if(!compareStates(&tree->state,&solved)){
 	return 1;
   }
-  if(tree->children[0])
-	if(searchTree(tree->children[0])){
-		printf("Face clockwise\n");
-		return 1;
-	}
-  if(tree->children[1])
-	if(searchTree(tree->children[1])){
-		printf("Face counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[2])
-	if(searchTree(tree->children[2])){
-		printf("Face twice\n");
-		return 1;
-	}
-  if(tree->children[3])
-	if(searchTree(tree->children[3])){
-		printf("Left clockwise \n");
-		return 1;
-	}
-  if(tree->children[4])
-	if(searchTree(tree->children[4])){
-		printf("Left counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[5])
-	if(searchTree(tree->children[5])){
-		printf("Left twice\n");
-		return 1;
-	}
-  if(tree->children[6])
-	if(searchTree(tree->children[6])){
-		printf("Right clockwise\n");
-		return 1;
-	}
-  if(tree->children[7])
-	if(searchTree(tree->children[7])){
-		printf("Right counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[8])
-	if(searchTree(tree->children[8])){
-		printf("Right twice\n");
-		return 1;
-	}
-  if(tree->children[9])
-	if(searchTree(tree->children[9])){
-		printf("Rear clockwise\n");
-		return 1;
-	}
-  if(tree->children[10])
-	if(searchTree(tree->children[10])){
-		printf("Rear counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[11])
-	if(searchTree(tree->children[11])){
-		printf("Rear twice\n");
-		return 1;
-	}
-  if(tree->children[12])
-	if(searchTree(tree->children[12])){
-		printf("Top clockwise\n");
-		return 1;
-	}
-  if(tree->children[13])
-	if(searchTree(tree->children[13])){
-		printf("Top counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[14])
-	if(searchTree(tree->children[14])){
-		printf("Top twice\n");
-		return 1;
-	}
-  if(tree->children[15])
-	if(searchTree(tree->children[15])){
-		printf("Bottom clockwise\n");
-		return 1;
-	}
-  if(tree->children[16])
-	if(searchTree(tree->children[16])){
-		printf("Bottom counter-clockwise\n");
-		return 1;
-	}
-  if(tree->children[17])
-	if(searchTree(tree->children[17])){
-		printf("Botttom twice\n");
-		return 1;
-	}
+  int c;
+  for(c=0;c<18;++c){
+	if(tree->children[c])
+		if(searchTree(tree->children[c])){
+			printf("%s\n",descriptions[c]);
+			return 1;
+		}
+  }
   return 0;
 }
 
@@ -441,16 +398,32 @@ void freeTree(stateTreeNode_t *tree){
 }
 
 int main(){
-  stateTreeNode_t tree;
-  tree.state=(state_t){{b,b,r,o,r,o,w,w,r,b,b,y,b,y,b,b,o,w,w,g,g,g,g,g,o,g,g,o,r,o,y,r,g,w,w,y,r,y,r,r,y,o,b,y,w,y,o,w}};
-  stateList_t *stateList=(stateList_t*)malloc(sizeof(stateList_t)+sizeof(sem_t));
-  stateList->state=&tree.state;
+  stateTreeNode_t tree; //Root of the tree lives of the stack, but the rest of it is on the heap
+  tree.state=shuffle(5,1);
+  stateList_t *stateList=(stateList_t*)malloc(sizeof(stateList_t)+sizeof(sem_t)); //This is the only stateList_t that actually has a sem_t in it
+  stateList->state=&tree.state; //stateList_t's don't actually have a copy of a state_t, just a pointer to a valid one
   stateList->next=NULL;
   sem_init(stateList->turn,0,1);
+  treeQueue_t treeQueue;
+  treeQueue.head=NULL;
+  treeQueue.tail=NULL;
+  sem_init(&treeQueue.turn,0,1);
   printf("Building tree\n");
-  buildTree(&tree,stateList);
+  buildTreeData_t buildTreeData=(buildTreeData_t){.node=&tree,.stateList=stateList,.treeQueue=&treeQueue};
+  pthread_t pid[NUM_THREADS];
+  pthread_create(&pid[0],NULL,buildTree,&buildTreeData);
+  sleep(5);
+  if(!solutionFound){
+  	int c;
+  	for(c=0;c<NUM_THREADS;++c){
+		buildTreeData.node=treeQueueRemove(&treeQueue);
+		pthread_create(&pid[c],NULL,buildTree,&buildTreeData);
+	}
+  }
+  pthread_join(pid[0],NULL);
   freeStateList(stateList);
   sem_destroy(stateList->turn);
+  sem_destroy(&treeQueue.turn);
   searchTree(&tree);
   freeTree(&tree);
 }
