@@ -4,8 +4,9 @@
 #include <semaphore.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <string.h>
 
-#define NUM_THREADS 800
+#define NUM_THREADS 16
 
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 //This allows us to convert colors directly to integer types, and it also saves memory, since we only need 3 bits
@@ -50,6 +51,7 @@ state_t solved=(state_t){{white,white,white,white,white,white,white,white,blue,b
 typedef struct stateTreeNode{ //Has a pointer for all possible movements from this point and a state
   state_t state;
   struct stateTreeNode *children[18];
+  unsigned char tier;
 }stateTreeNode_t;
 
 typedef struct treeQueueNode{ //Nodes for treeQueue
@@ -253,64 +255,7 @@ stateTreeNode_t* treeQueueRemove(treeQueue_t *treeQueue){
   return out;
 }
 
-typedef struct volatileData{
-  volatile state_t *state;
-  volatile stateTreeNode_t **put;
-  void (*transformation)(state_t*,state_t*);
-  sem_t done,restart;
-}volatileData_t;
-
-typedef struct threadData{
-  stateList_t *stateList;
-  treeQueue_t *treeQueue;
-  volatile volatileData_t *volatiles;
-  sem_t done;
-}threadData_t;
-
 volatile int solutionFound=0;
-
-void* threadBuild(void *data){
-  volatileData_t volatiles;
-  sem_init(&volatiles.done,0,0);
-  sem_init(&volatiles.restart,0,0);
-  ((threadData_t*)data)->volatiles=&volatiles;
-  sem_post(&((threadData_t*)data)->done);
-  stateList_t *stateList=((threadData_t*)data)->stateList;
-  treeQueue_t *treeQueue=((threadData_t*)data)->treeQueue;
-  state_t transformed;
-  state_t *vstate;
-  stateTreeNode_t **vput;
-  state_t **listSlip;
-  sem_wait(&volatiles.restart);
-  int c;
-  while(!solutionFound){
-	vstate=(state_t*)volatiles.state;
-	vput=(stateTreeNode_t**)volatiles.put;
-  	(volatiles.transformation)(vstate,&transformed);
-	if((listSlip=addList(stateList,&transformed))){
-		(*vput)=malloc(sizeof(stateTreeNode_t));
-		(*vput)->state=transformed;
-		*listSlip=&(*vput)->state;
-		sem_post(stateList->turn);
-		if(compareStates(&solved,&transformed)){
-			treeQueueAdd(treeQueue,*vput);
-		}
-		else{
-			solutionFound=1;
-			for(c=0;c<18;++c)
-				(*vput)->children[c]=NULL;
-		}
-	}
-	else
-		*vput=NULL;
-	sem_post(&volatiles.done);
-	sem_wait(&volatiles.restart);
-  }
-  sem_wait(&((threadData_t*)data)->done);
-  sem_destroy(&volatiles.done);
-  sem_destroy(&volatiles.restart);
-  return NULL;
-}
 
 typedef struct buildTreeData{
   stateTreeNode_t *node;
@@ -318,65 +263,69 @@ typedef struct buildTreeData{
   treeQueue_t *treeQueue;
 }buildTreeData_t;
 
+volatile unsigned char currentTier=0;
+
 void* buildTree(void *data){
   stateTreeNode_t *node=((buildTreeData_t*)data)->node;
   stateList_t *stateList=((buildTreeData_t*)data)->stateList;
   treeQueue_t *treeQueue=((buildTreeData_t*)data)->treeQueue;
-  pthread_t pids[18];
-  volatileData_t *volatiles[18];
-  threadData_t threadData=(threadData_t){.stateList=stateList,.treeQueue=treeQueue,.volatiles=NULL,};
-  sem_init(&threadData.done,0,0);
+  state_t hold;
+  state_t **listSlip;
   int c;
-  for(c=0;c<18;++c){
-	pthread_create(&pids[c],NULL,threadBuild,(void*)&threadData);
-	sem_wait(&threadData.done);
-	volatiles[c]=(volatileData_t*)threadData.volatiles;
-	volatiles[c]->state=(volatile state_t*)&node->state;
-	volatiles[c]->put=(volatile stateTreeNode_t**)&node->children[c];
-	volatiles[c]->transformation=transformations[c];
-	sem_post(&volatiles[c]->restart);
-  }
-  while(!solutionFound&&(node=treeQueueRemove(treeQueue))){
+  while(!solutionFound){
 	for(c=0;c<18;++c){
-		sem_wait(&volatiles[c]->done);
-		volatiles[c]->state=&node->state;
-		volatiles[c]->put=(volatile stateTreeNode_t**)&node->children[c];
-		sem_post(&volatiles[c]->restart);
-	}
-  }
-  if(!solutionFound){
-	printf("Solution not found\n");
-	solutionFound=1;
-  }
-  else{
-	printf("SOLUTION FOUND\n");
-  	while((node=treeQueueRemove(treeQueue)))
-		for(c=0;c<18;++c)
+		if(node->tier>currentTier){
+			currentTier=node->tier;
+			printf("Beginning tier %d\n",(int)node->tier);
+		}
+		(transformations[c])(&node->state,&hold);
+		if((listSlip=addList(stateList,&hold))){
+			node->children[c]=malloc(sizeof(stateTreeNode_t));
+			node->children[c]->state=hold;
+			*listSlip=&node->children[c]->state;
+			sem_post(stateList->turn);
+			node->children[c]->tier=node->tier+1;
+			if(compareStates(&solved,&hold))
+				treeQueueAdd(treeQueue,node->children[c]);
+			else{
+				solutionFound=1;
+				printf("\n\nSolution found!! please wait as instructions are generated:\n\n");
+				for(++c;c<18;++c)
+					node->children[c]=NULL;
+				break;
+			}
+		}
+		else
 			node->children[c]=NULL;
+	}
+	if(!(node=treeQueueRemove(treeQueue)))
+		solutionFound=1;
   }
-  for(c=0;c<18;++c){
-	sem_post(&volatiles[c]->restart);
-	sem_post(&threadData.done);
-  }
-  for(c=0;c<18;++c)
-	pthread_join(pids[c],NULL);
-  sem_destroy(&threadData.done);
+  while((node=treeQueueRemove(treeQueue)))
+	for(c=0;c<18;++c)
+		node->children[c]=NULL;
   return NULL;
 }
 
-int searchTree(stateTreeNode_t *tree){
+char* searchTree(stateTreeNode_t *tree){
+  char *out=NULL;
   if(!compareStates(&tree->state,&solved)){
-	return 1;
+	out=malloc(1);
+	*out='\0';
+	return out;
   }
   int c;
+  char *hold;
   for(c=0;c<18;++c){
 	if(tree->children[c])
-		if(searchTree(tree->children[c])){
-			printf("%s\n",descriptions[c]);
-			return 1;
+		if((hold=searchTree(tree->children[c]))){
+			out=malloc(strlen(hold)+strlen(descriptions[c])+2);
+			sprintf(out,"%s\n%s",descriptions[c],hold);
+			free(hold);
+			return out;
 		}
   }
-  return 0;
+  return NULL;
 }
 
 void recursiveFreeTree(stateTreeNode_t *tree){
@@ -397,6 +346,7 @@ void freeTree(stateTreeNode_t *tree){
 int main(){
   stateTreeNode_t tree; //Root of the tree lives of the stack, but the rest of it is on the heap
   tree.state=shuffle(5,1);
+  tree.tier=0;
   stateList_t *stateList=(stateList_t*)malloc(sizeof(stateList_t)+sizeof(sem_t)); //This is the only stateList_t that actually has a sem_t in it
   stateList->state=&tree.state; //stateList_t's don't actually have a copy of a state_t, just a pointer to a valid one
   stateList->next=NULL;
@@ -410,18 +360,22 @@ int main(){
   pthread_create(&pids[0],NULL,buildTree,&buildTreeData);
   sleep(5);
   int c;
-  if(!solutionFound){
-  	for(c=1;c<NUM_THREADS;++c){
-		buildTreeData.node=treeQueueRemove(&treeQueue);
-		pthread_create(&pids[c],NULL,buildTree,&buildTreeData);
-	}
+  for(c=1;c<NUM_THREADS;++c){
+	if(!(buildTreeData.node=treeQueueRemove(&treeQueue)))
+		break;
+	pthread_create(&pids[c],NULL,buildTree,&buildTreeData);
   }
-  pthread_join(pids[0],NULL);
-  freeStateList(stateList);
+  for(--c;c>-1;--c)
+  	pthread_join(pids[c],NULL);
   sem_destroy(stateList->turn);
+  freeStateList(stateList);
+  char *string;
+  if(!(string=searchTree(&tree)))
+	printf("No solution found\n");
+  else{
+	printf("%s\n",string);
+	free(string);
+  }
   sem_destroy(&treeQueue.turn);
-  searchTree(&tree);
   freeTree(&tree);
-  for(c=1;c<NUM_THREADS;++c)
-	pthread_join(pids[c],NULL);
 }
