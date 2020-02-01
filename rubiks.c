@@ -417,7 +417,8 @@ void freeTree(stateTreeNode_t *tree){
 }
 
 int main(){
-  stateTreeNode_t fromMixed=(stateTreeNode_t){.state=shuffle(7,1),.tier=0,.side=7};
+  state_t shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
+  stateTreeNode_t fromMixed=(stateTreeNode_t){.state=shuffled,.tier=0,.side=7};
   stateTreeNode_t fromSolved=(stateTreeNode_t){.state=solved,.tier=0,.side=7};
   stateList_t *mixedList=malloc(sizeof(stateList_t)+sizeof(sem_t));
   stateList_t *solvedList=malloc(sizeof(stateList_t)+sizeof(sem_t));
