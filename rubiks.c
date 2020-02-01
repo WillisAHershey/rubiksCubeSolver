@@ -265,14 +265,16 @@ volatile int solutionFound=0;
 typedef struct buildTreeData{
   stateList_t *stateList;
   treeQueue_t *treeQueue;
+  sem_t *sem;
 }buildTreeData_t;
 
 volatile unsigned char currentTier=0;
 
-state_t listMatch(stateList_t *a,stateList_t *b){
+state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
   stateList_t *apt,*bpt;
   int comp;
   while(!solutionFound){
+	sem_wait(sem);
 	sem_wait(a->turn);
 	sem_wait(b->turn);
 	apt=a;
@@ -300,6 +302,7 @@ state_t listMatch(stateList_t *a,stateList_t *b){
 void* buildTree(void *data){
   stateList_t *stateList=((buildTreeData_t*)data)->stateList;
   treeQueue_t *treeQueue=((buildTreeData_t*)data)->treeQueue;
+  sem_t *sem=((buildTreeData_t*)data)->sem;
   stateTreeNode_t *node=treeQueueRemove(treeQueue);
   state_t hold;
   state_t **listSlip;
@@ -309,6 +312,7 @@ void* buildTree(void *data){
 	currentSide=node->side*3;
  	if(node->tier>currentTier){
 		currentTier=node->tier;
+		sem_post(sem);
 		printf("Beginning tier %d\n",(int)currentTier);
 	}
  	for(c=0;c<18;++c){
@@ -430,8 +434,10 @@ int main(){
   treeQueue_t solvedQueue=(treeQueue_t){.head=NULL,.tail=NULL};
   sem_init(&mixedQueue.turn,0,1);
   sem_init(&solvedQueue.turn,0,1);
-  buildTreeData_t mixedTreeData=(buildTreeData_t){.stateList=mixedList,.treeQueue=&mixedQueue};
-  buildTreeData_t solvedTreeData=(buildTreeData_t){.stateList=solvedList,.treeQueue=&solvedQueue};
+  sem_t matchSem;
+  sem_init(&matchSem,0,1);
+  buildTreeData_t mixedTreeData=(buildTreeData_t){.stateList=mixedList,.treeQueue=&mixedQueue,.sem=&matchSem};
+  buildTreeData_t solvedTreeData=(buildTreeData_t){.stateList=solvedList,.treeQueue=&solvedQueue,.sem=&matchSem};
   pthread_t pids[NUM_THREADS-1];
   int c=0,s,m;
   m=buildOne(&fromMixed,mixedList,&mixedQueue);
@@ -448,7 +454,7 @@ int main(){
 	pthread_create(&pids[c++],NULL,buildTree,&solvedTreeData);
 	--s;
   }
-  state_t link=listMatch(mixedList,solvedList);
+  state_t link=listMatch(mixedList,solvedList,&matchSem);
   for(--c;c>-1;--c)
   	pthread_join(pids[c],NULL);
   char *string;
