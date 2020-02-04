@@ -11,11 +11,13 @@
 //enum color represents a relationship between the colors of a rubiks cube and integers 0-5
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 
-typedef struct state{ //A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
+//A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
+typedef struct state{  
   enum color c[48];
 }state_t;
 
-int compareStates(state_t *a,state_t *b){ //returns -1 if less, 1 if greater, and 0 if equal. This allows us to keep our state list in order.
+//Returns -1 if a<b, 0 if a=b, and 1 if a>b. This allows us to keep our stateList in order
+int compareStates(state_t *a,state_t *b){
   int i;
   for(i=0;i<48;++i)
 	if(a->c[i]!=b->c[i])
@@ -23,7 +25,8 @@ int compareStates(state_t *a,state_t *b){ //returns -1 if less, 1 if greater, an
   return 0;
 }
 
-void printState(state_t *in){ //This allows us to print any given state for debugging
+//This allows us to print states for debugging purposes
+void printState(state_t *in){
   int c;
   printf("{");
   for(c=0;c<48;++c){
@@ -56,30 +59,36 @@ void printState(state_t *in){ //This allows us to print any given state for debu
 //This is the solved state, the state we attempt to achieve
 state_t solved=(state_t){{white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
 
-typedef struct stateTreeNode{ //Contains a state_t, a pointer to all 18 possible children, a tier, and the side it was computed on.
+//Contains a state, pointers to all 18 possible children states (in the order of the functions below), tier of node in tree, and side it was computed on by parent
+typedef struct stateTreeNode{
   state_t state;
   struct stateTreeNode *children[18];
   unsigned char tier;
   char side;
 }stateTreeNode_t;
 
-typedef struct treeQueueNode{ //Node for BFS search queue
+//Linked list node for BFS queue
+typedef struct treeQueueNode{
   stateTreeNode_t *node;
   struct treeQueueNode *next;
 }treeQueueNode_t;
 
-typedef struct treeQueue{ //Queue so we can process the nodes in order for BFS search
+//Thread-safe structure for BFS queue
+typedef struct treeQueue{
   treeQueueNode_t *head;
   treeQueueNode_t *tail;
   sem_t turn;
 }treeQueue_t;
 
-typedef struct stateList{ //List of states we have visited before, so we can ignore repetitive cases.
+//Structure/node for ordered linked-list of visited states
+typedef struct stateList{
   state_t *state;
   struct stateList *next;
+//Only the head of the list will have a sem_t
   sem_t turn[0];
 }stateList_t;
 
+//This is meant to be a literall stored in the data section of the executable, so we can memcpy NULLs into an array, instead of using a loop
 void *eightteenNulls[]={NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 //The following functions mutate the input state to simulate some specific turn of the cube and save the resulting state at the given address
@@ -189,15 +198,24 @@ state_t shuffle(int in,int verbose){ //Performs a random virtual shuffle of some
   return out;
 }
 
-void printStateList(stateList_t *list){ //Prints all values of the stateList from smallest to largest
+//Prints all values of the stateList from smallest to largest
+void printStateList(stateList_t *list){
   stateList_t *pt;
   for(pt=list;pt;pt=pt->next)
 	printState(pt->state);
 }
 
-state_t** addList(stateList_t *stateList,state_t *state){ //Returns pointer to place in the list where the pointer to the state_t should be stored
-  stateList_t *pt; //The state_t pointer that we're passed is to a temporary variable in another function, so it is up to the calling function to save a permanent
-  int comp;        //Pointer to state_t at the address returned, and then release the semaphore to the list.
+//Retursn a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
+state_t** addList(stateList_t *stateList,state_t *state){
+/*The state_t* that is passed to this function is a pointer to a temporary and contantly-changing stack variable in the calling function,
+  so saving that pointer in the list would be #verybad. A permament home for the state_t is also not made until this function confirms it is not a duplicate.
+  To remedy this problem this function behaves very oddly, in my opinion. If the state is found to be a duplicate, the semaphore is released, and NULL is returned.
+  If it is found to be a new state, memory is malloced, and placed into the list at the correct place, a pointer to that new uninitialized memory is returned, and it
+  is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also release the mutex semaphore after the fact.
+  Is it messy? Yes. Does it work? Without problem.
+  */
+  stateList_t *pt;
+  int comp;
   state_t **out=NULL;
   sem_wait(stateList->turn);
   for(pt=stateList;(comp=compareStates(pt->state,state))==-1&&pt->next;pt=pt->next)
@@ -212,7 +230,7 @@ state_t** addList(stateList_t *stateList,state_t *state){ //Returns pointer to p
 	out=&pt->state;
 	pt->next=NULL;
   }
-  else{	
+  else{
 	out=&pt->state;
 	stateList_t *n=malloc(sizeof(stateList_t));
 	n->state=pt->state;
@@ -222,6 +240,7 @@ state_t** addList(stateList_t *stateList,state_t *state){ //Returns pointer to p
   return out;
 }
 
+//Frees all memory associated with the stateList
 void freeStateList(stateList_t *list){
   stateList_t *pt,*lead;
   for(pt=list;pt;pt=lead){
@@ -230,6 +249,7 @@ void freeStateList(stateList_t *list){
   }
 }
 
+//Thread-safe function to add a pointer to a new stateTreeNode_t to the BFS queue
 void treeQueueAdd(treeQueue_t *treeQueue,stateTreeNode_t *n){
   treeQueueNode_t *node=malloc(sizeof(treeQueueNode_t));
   node->node=n;
@@ -244,6 +264,7 @@ void treeQueueAdd(treeQueue_t *treeQueue,stateTreeNode_t *n){
   sem_post(&treeQueue->turn);
 }
 
+//Thread-safe function to remove a pointer to the oldest stateTreeNode_t from the BFS queue. Returns NULL if the queue is empty
 stateTreeNode_t* treeQueueRemove(treeQueue_t *treeQueue){
   sem_wait(&treeQueue->turn);
   if(!treeQueue->head){
@@ -260,16 +281,20 @@ stateTreeNode_t* treeQueueRemove(treeQueue_t *treeQueue){
   return out;
 }
 
+//This global variable is a signal to all threads to stop making new nodes.
 volatile int solutionFound=0;
 
+//This is the struct to hold the data a thread needs to perform the buildTree function properly.
 typedef struct buildTreeData{
   stateList_t *stateList;
   treeQueue_t *treeQueue;
   sem_t *sem;
 }buildTreeData_t;
 
+//This allows us to keep track of which tier of the tree we're currently processing
 volatile unsigned char currentTier=0;
 
+//This function compares two stateLists for common elements every time it is awoken by some sem_t. It blocks on some thread until solutionFound becomes 1
 state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
   stateList_t *apt,*bpt;
   int comp;
@@ -299,6 +324,7 @@ state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
   return solved;
 }
 
+//This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
 void* buildTree(void *data){
   stateList_t *stateList=((buildTreeData_t*)data)->stateList;
   treeQueue_t *treeQueue=((buildTreeData_t*)data)->treeQueue;
@@ -337,11 +363,14 @@ void* buildTree(void *data){
 	if(!(node=treeQueueRemove(treeQueue)))
 		solutionFound=1;
   }
+//The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree.
   while((node=treeQueueRemove(treeQueue)))
 	memcpy(node->children,eightteenNulls,18*sizeof(void*));
   return NULL;
 }
 
+//This function is meant to be run by the parent thread, to insure that all of the threads running buildTree will have a first node to process
+//It returns the number of nodes added to the queue
 int buildOne(stateTreeNode_t *node,stateList_t *stateList,treeQueue_t *treeQueue){
   state_t hold;
   state_t **listSlip;
@@ -364,6 +393,7 @@ int buildOne(stateTreeNode_t *node,stateList_t *stateList,treeQueue_t *treeQueue
   return out;
 }
 
+//This searches the mixed tree and returns a string of instructions to get to the target state of the tree. Return string must be freed
 char* searchTree(stateTreeNode_t *tree,state_t *target){
   char *out=NULL;
   if(!compareStates(&tree->state,target)){
@@ -385,6 +415,7 @@ char* searchTree(stateTreeNode_t *tree,state_t *target){
   return NULL;
 }
 
+//This searches the solved tree and prints instructions on how to get from the target state to solved
 int backwardsSearchTree(stateTreeNode_t *tree,state_t *target){
   if(!compareStates(&tree->state,target))
 	return 1;
@@ -405,6 +436,7 @@ int backwardsSearchTree(stateTreeNode_t *tree,state_t *target){
   return 0;
 }
 
+//Frees all maloced nodes of the tree
 void recursiveFreeTree(stateTreeNode_t *tree){
   if(!tree)
 	return;
@@ -420,6 +452,11 @@ void freeTree(stateTreeNode_t *tree){
   	recursiveFreeTree(tree->children[c]);
 }
 
+
+/*Two stateTrees, two stateLists, and two treeQueues are made. One for the mixed cube's state, and one for the solution state.
+ *Half of the threads work on solving the mixed cube, and the other work on shuffling the solved cube, until they encounter a common state
+ *When that common state is found, all threads terminate and the trees are compared to create a list of results.
+ */
 int main(){
   state_t shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
   stateTreeNode_t fromMixed=(stateTreeNode_t){.state=shuffled,.tier=0,.side=7};
@@ -435,7 +472,7 @@ int main(){
   sem_init(&mixedQueue.turn,0,1);
   sem_init(&solvedQueue.turn,0,1);
   sem_t matchSem;
-  sem_init(&matchSem,0,1);
+  sem_init(&matchSem,0,0);
   buildTreeData_t mixedTreeData=(buildTreeData_t){.stateList=mixedList,.treeQueue=&mixedQueue,.sem=&matchSem};
   buildTreeData_t solvedTreeData=(buildTreeData_t){.stateList=solvedList,.treeQueue=&solvedQueue,.sem=&matchSem};
   pthread_t pids[NUM_THREADS-1];
@@ -443,14 +480,12 @@ int main(){
   m=buildOne(&fromMixed,mixedList,&mixedQueue);
   s=buildOne(&fromSolved,solvedList,&solvedQueue);
   while(c<NUM_THREADS-1){
-	if(!m){
-		m=buildOne(treeQueueRemove(&mixedQueue),mixedList,&mixedQueue);
-	}
+	if(m<1)
+		m=buildOne(treeQueueRemove(&mixedQueue),mixedList,&mixedQueue)-1;
 	pthread_create(&pids[c++],NULL,buildTree,&mixedTreeData);
 	--m;
-	if(!s){
-		s=buildOne(treeQueueRemove(&solvedQueue),solvedList,&solvedQueue);
-	}
+	if(s<1)
+		s=buildOne(treeQueueRemove(&solvedQueue),solvedList,&solvedQueue)-1;
 	pthread_create(&pids[c++],NULL,buildTree,&solvedTreeData);
 	--s;
   }
