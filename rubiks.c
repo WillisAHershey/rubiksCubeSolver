@@ -8,8 +8,8 @@
 
 #define NUM_THREADS 30
 
-//enum color represents a relationship between the colors of a rubiks cube and integers 0-5
-enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
+//enum color represents a relationship between the colors of a rubiks cube and integers 0-5 and an extra invalid value
+enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,invalid=6,w=0,b=1,g=2,y=3,r=4,o=5,i=6};
 
 //A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
 typedef struct state{  
@@ -205,11 +205,11 @@ void printStateList(stateList_t *list){
 	printState(pt->state);
 }
 
-//Retursn a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
+//Returns a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
 state_t** addList(stateList_t *stateList,state_t *state){
 /*The state_t* that is passed to this function is a pointer to a temporary and contantly-changing stack variable in the calling function,
   so saving that pointer in the list would be #verybad. A permament home for the state_t is also not made until this function confirms it is not a duplicate.
-  To remedy this problem this function behaves very oddly, in my opinion. If the state is found to be a duplicate, the semaphore is released, and NULL is returned.
+  To remedy this problem this function behaves very oddly. If the state is found to be a duplicate, the semaphore is released, and NULL is returned.
   If it is found to be a new state, memory is malloced, and placed into the list at the correct place, a pointer to that new uninitialized memory is returned, and it
   is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also release the mutex semaphore after the fact.
   Is it messy? Yes. Does it work? Without problem.
@@ -225,17 +225,19 @@ state_t** addList(stateList_t *stateList,state_t *state){
 	return out;
   }
   else if(comp==-1){
-	pt->next=malloc(sizeof(stateList_t));
-	pt=pt->next;
-	out=&pt->state;
-	pt->next=NULL;
+	stateList_t *n=malloc(sizeof(stateList_t));
+	n->state=NULL;
+	n->next=NULL;
+	pt->next=n;
+	out=&n->state;
   }
   else{
-	out=&pt->state;
 	stateList_t *n=malloc(sizeof(stateList_t));
 	n->state=pt->state;
 	n->next=pt->next;
 	pt->next=n;
+	pt->state=NULL;
+	out=&pt->state;
   }
   return out;
 }
@@ -299,18 +301,26 @@ state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
   stateList_t *apt,*bpt;
   int comp;
   while(!solutionFound){
-	sem_wait(sem);
-	sem_wait(a->turn);
-	sem_wait(b->turn);
+	//sem_wait(sem);
+	//sem_wait(a->turn);
+	//sem_wait(b->turn);
 	apt=a;
 	bpt=b;
 	while(apt&&bpt){
+		if(!apt->state){
+			apt=apt->next;
+			continue;
+		}
+		if(!bpt->state){
+			bpt=bpt->next;
+			continue;
+		}
 		comp=compareStates(apt->state,bpt->state);
 		if(!comp){
 			solutionFound=1;
 			printf("Solution found. Please wait while instructions are generated\n");
-			sem_post(a->turn);
-			sem_post(b->turn);
+			//sem_post(a->turn);
+			//sem_post(b->turn);
 			return *(apt->state);
 		}
 		else if(comp==-1)
@@ -318,8 +328,8 @@ state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
 		else
 			bpt=bpt->next;
 	}
-	sem_post(a->turn);
-	sem_post(b->turn);
+	//sem_post(a->turn);
+	//sem_post(b->turn);
   }
   return solved;
 }
@@ -338,7 +348,7 @@ void* buildTree(void *data){
 	currentSide=node->side*3;
  	if(node->tier>currentTier){
 		currentTier=node->tier;
-		sem_post(sem);
+		//sem_post(sem);
 		printf("Beginning tier %d\n",(int)currentTier);
 	}
  	for(c=0;c<18;++c){
