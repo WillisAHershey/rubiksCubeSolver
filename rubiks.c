@@ -5,7 +5,6 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
-#include "groupMalloc.h"
 
 #define NUM_THREADS 30
 
@@ -13,24 +12,22 @@
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 
 //A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
-typedef struct state{  
+typedef struct stateStruct{  
   enum color c[48];
-}state_t;
+}state;
 
 //Returns -1 if a<b, 0 if a=b, and 1 if a>b. This allows us to keep our stateList in order
-int compareStates(state_t *a,state_t *b){
-  int i;
-  for(i=0;i<48;++i)
+inline int compareStates(state *a,state *b){
+  for(int i=0;i<48;++i)
 	if(a->c[i]!=b->c[i])
 		return a->c[i]<b->c[i]?-1:1;
   return 0;
 }
 
 //This allows us to print states for debugging purposes
-void printState(state_t *in){
-  int c;
+void printState(state *in){
   printf("{");
-  for(c=0;c<48;++c){
+  for(int c=0;c<48;++c){
 	switch(in->c[c]){
 	case white:
 		printf("w");
@@ -58,138 +55,138 @@ void printState(state_t *in){
 }
 
 //This is the solved state, the state we attempt to achieve
-state_t solved=(state_t){{white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
-
-groupMalloc_t stateTreeNodeGroup,treeQueueNodeGroup,stateListGroup;
+state solved=(state){{white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
 
 //Contains a state, pointers to all 18 possible children states (in the order of the functions below), tier of node in tree, and side it was computed on by parent
-typedef struct stateTreeNode{
-  state_t state;
-  struct stateTreeNode *children[18];
+typedef struct stateTreeNodeStruct{
+  state state;
   unsigned char tier;
-  char side;
-}stateTreeNode_t;
+  unsigned char side;
+  struct stateTreeNodeStruct *children[18];
+}stateTreeNode;
 
 //Linked list node for BFS queue
-typedef struct treeQueueNode{
-  stateTreeNode_t *node;
-  struct treeQueueNode *next;
-}treeQueueNode_t;
+typedef struct treeQueueNodeStruct{
+  stateTreeNode *node;
+  struct treeQueueNodeStruct *next;
+}treeQueueNode;
 
 //Thread-safe structure for BFS queue
-typedef struct treeQueue{
-  treeQueueNode_t *head;
-  treeQueueNode_t *tail;
-  sem_t turn;
-}treeQueue_t;
+typedef struct treeQueueStruct{
+  treeQueueNode *head;
+  treeQueueNode *tail;
+  pthread_mutex_t mutex;
+  sem_t available;
+}treeQueue;
 
 //Structure/node for ordered linked-list of visited states
-typedef struct stateList{
-  state_t *state;
-  struct stateList *next;
-//Only the head of the list will have a sem_t
-  sem_t turn[0];
-}stateList_t;
+typedef struct stateListNodeStruct{
+  state *s[6];
+  struct stateListNodeStruct *next[6];
+}stateListNode;
 
-//This is meant to be a literall stored in the data section of the executable, so we can memcpy NULLs into an array, instead of using a loop
-void *eightteenNulls[]={NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
+typedef struct stateListStruct{
+  stateListNode *head;
+  pthread_mutex_t mutex;
+}stateList;
 
-//The following functions mutate the input state to simulate some specific turn of the cube and save the resulting state at the given address
-//Pointers are used to prevent the machine from having to copy so much, but these are still rather heavy functions.
+//This is meant to be a literal stored in the data section of the executable, so we can memcpy NULLs into an array, instead of using a loop
+stateTreeNode *eightteenNulls[]={NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
-void faceClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[5],in->c[3],in->c[0],in->c[6],in->c[1],in->c[7],in->c[4],in->c[2],in->c[40],in->c[41],in->c[42],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[32],in->c[33],in->c[34],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[8],in->c[9],in->c[10],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[16],in->c[17],in->c[18],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+//The following eightteen functions mutate the input state to simulate some specific turn of the cube and save the resulting state at the given address
+//Pointers are used to prevent the machine from having to copy so much, but these are still rather costly functions to execute.
+L
+void faceClock(state *in,state *out){
+  *out=(state){{in->c[5],in->c[3],in->c[0],in->c[6],in->c[1],in->c[7],in->c[4],in->c[2],in->c[40],in->c[41],in->c[42],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[32],in->c[33],in->c[34],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[8],in->c[9],in->c[10],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[16],in->c[17],in->c[18],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void faceCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[2],in->c[4],in->c[7],in->c[1],in->c[6],in->c[0],in->c[3],in->c[5],in->c[32],in->c[33],in->c[34],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[40],in->c[41],in->c[42],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[16],in->c[17],in->c[18],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[8],in->c[9],in->c[10],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+void faceCounter(state *in,state *out){
+  *out=(state){{in->c[2],in->c[4],in->c[7],in->c[1],in->c[6],in->c[0],in->c[3],in->c[5],in->c[32],in->c[33],in->c[34],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[40],in->c[41],in->c[42],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[16],in->c[17],in->c[18],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[8],in->c[9],in->c[10],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void faceTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[7],in->c[6],in->c[5],in->c[4],in->c[3],in->c[2],in->c[1],in->c[0],in->c[16],in->c[17],in->c[18],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[8],in->c[9],in->c[10],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[40],in->c[41],in->c[42],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[32],in->c[33],in->c[34],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+void faceTwice(state *in,state *out){
+  *out=(state){{in->c[7],in->c[6],in->c[5],in->c[4],in->c[3],in->c[2],in->c[1],in->c[0],in->c[16],in->c[17],in->c[18],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[8],in->c[9],in->c[10],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[40],in->c[41],in->c[42],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[32],in->c[33],in->c[34],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void leftClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[39],in->c[1],in->c[2],in->c[36],in->c[4],in->c[34],in->c[6],in->c[7],in->c[13],in->c[11],in->c[8],in->c[14],in->c[9],in->c[15],in->c[12],in->c[10],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[45],in->c[27],in->c[43],in->c[29],in->c[30],in->c[40],in->c[32],in->c[33],in->c[26],in->c[35],in->c[28],in->c[37],in->c[38],in->c[31],in->c[0],in->c[41],in->c[42],in->c[3],in->c[44],in->c[5],in->c[46],in->c[47]}};
+void leftClock(state *in,state *out){
+  *out=(state){{in->c[39],in->c[1],in->c[2],in->c[36],in->c[4],in->c[34],in->c[6],in->c[7],in->c[13],in->c[11],in->c[8],in->c[14],in->c[9],in->c[15],in->c[12],in->c[10],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[45],in->c[27],in->c[43],in->c[29],in->c[30],in->c[40],in->c[32],in->c[33],in->c[26],in->c[35],in->c[28],in->c[37],in->c[38],in->c[31],in->c[0],in->c[41],in->c[42],in->c[3],in->c[44],in->c[5],in->c[46],in->c[47]}};
 }
 
-void leftCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[40],in->c[1],in->c[2],in->c[43],in->c[4],in->c[45],in->c[6],in->c[7],in->c[10],in->c[12],in->c[15],in->c[9],in->c[14],in->c[8],in->c[11],in->c[13],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[34],in->c[27],in->c[36],in->c[29],in->c[30],in->c[39],in->c[32],in->c[33],in->c[5],in->c[35],in->c[3],in->c[37],in->c[38],in->c[0],in->c[31],in->c[41],in->c[42],in->c[28],in->c[44],in->c[26],in->c[46],in->c[47]}};
+void leftCounter(state *in,state *out){
+  *out=(state){{in->c[40],in->c[1],in->c[2],in->c[43],in->c[4],in->c[45],in->c[6],in->c[7],in->c[10],in->c[12],in->c[15],in->c[9],in->c[14],in->c[8],in->c[11],in->c[13],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[34],in->c[27],in->c[36],in->c[29],in->c[30],in->c[39],in->c[32],in->c[33],in->c[5],in->c[35],in->c[3],in->c[37],in->c[38],in->c[0],in->c[31],in->c[41],in->c[42],in->c[28],in->c[44],in->c[26],in->c[46],in->c[47]}};
 }
 
-void leftTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[31],in->c[1],in->c[2],in->c[28],in->c[4],in->c[26],in->c[6],in->c[7],in->c[15],in->c[14],in->c[13],in->c[12],in->c[11],in->c[10],in->c[9],in->c[8],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[5],in->c[27],in->c[3],in->c[29],in->c[30],in->c[0],in->c[32],in->c[33],in->c[45],in->c[35],in->c[43],in->c[37],in->c[38],in->c[40],in->c[39],in->c[41],in->c[42],in->c[36],in->c[44],in->c[34],in->c[46],in->c[47]}};
+void leftTwice(state *in,state *out){
+  *out=(state){{in->c[31],in->c[1],in->c[2],in->c[28],in->c[4],in->c[26],in->c[6],in->c[7],in->c[15],in->c[14],in->c[13],in->c[12],in->c[11],in->c[10],in->c[9],in->c[8],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[21],in->c[22],in->c[23],in->c[24],in->c[25],in->c[5],in->c[27],in->c[3],in->c[29],in->c[30],in->c[0],in->c[32],in->c[33],in->c[45],in->c[35],in->c[43],in->c[37],in->c[38],in->c[40],in->c[39],in->c[41],in->c[42],in->c[36],in->c[44],in->c[34],in->c[46],in->c[47]}};
 }
 
-void rightClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[42],in->c[3],in->c[44],in->c[5],in->c[6],in->c[47],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[21],in->c[19],in->c[16],in->c[22],in->c[17],in->c[23],in->c[20],in->c[18],in->c[32],in->c[25],in->c[26],in->c[35],in->c[28],in->c[37],in->c[30],in->c[31],in->c[7],in->c[33],in->c[34],in->c[4],in->c[36],in->c[2],in->c[38],in->c[39],in->c[40],in->c[41],in->c[29],in->c[43],in->c[27],in->c[45],in->c[46],in->c[24]}};
+void rightClock(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[42],in->c[3],in->c[44],in->c[5],in->c[6],in->c[47],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[21],in->c[19],in->c[16],in->c[22],in->c[17],in->c[23],in->c[20],in->c[18],in->c[32],in->c[25],in->c[26],in->c[35],in->c[28],in->c[37],in->c[30],in->c[31],in->c[7],in->c[33],in->c[34],in->c[4],in->c[36],in->c[2],in->c[38],in->c[39],in->c[40],in->c[41],in->c[29],in->c[43],in->c[27],in->c[45],in->c[46],in->c[24]}};
 }
 
-void rightCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[37],in->c[3],in->c[35],in->c[5],in->c[6],in->c[32],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[18],in->c[20],in->c[23],in->c[17],in->c[22],in->c[16],in->c[19],in->c[21],in->c[47],in->c[25],in->c[26],in->c[44],in->c[28],in->c[42],in->c[30],in->c[31],in->c[24],in->c[33],in->c[34],in->c[27],in->c[36],in->c[29],in->c[38],in->c[39],in->c[40],in->c[41],in->c[2],in->c[43],in->c[4],in->c[45],in->c[46],in->c[7]}};
+void rightCounter(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[37],in->c[3],in->c[35],in->c[5],in->c[6],in->c[32],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[18],in->c[20],in->c[23],in->c[17],in->c[22],in->c[16],in->c[19],in->c[21],in->c[47],in->c[25],in->c[26],in->c[44],in->c[28],in->c[42],in->c[30],in->c[31],in->c[24],in->c[33],in->c[34],in->c[27],in->c[36],in->c[29],in->c[38],in->c[39],in->c[40],in->c[41],in->c[2],in->c[43],in->c[4],in->c[45],in->c[46],in->c[7]}};
 }
 
-void rightTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[29],in->c[3],in->c[27],in->c[5],in->c[6],in->c[24],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[23],in->c[22],in->c[21],in->c[20],in->c[19],in->c[18],in->c[17],in->c[16],in->c[7],in->c[25],in->c[26],in->c[4],in->c[28],in->c[2],in->c[30],in->c[31],in->c[47],in->c[33],in->c[34],in->c[44],in->c[36],in->c[42],in->c[38],in->c[39],in->c[40],in->c[41],in->c[37],in->c[43],in->c[35],in->c[45],in->c[46],in->c[32]}};
+void rightTwice(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[29],in->c[3],in->c[27],in->c[5],in->c[6],in->c[24],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[13],in->c[14],in->c[15],in->c[23],in->c[22],in->c[21],in->c[20],in->c[19],in->c[18],in->c[17],in->c[16],in->c[7],in->c[25],in->c[26],in->c[4],in->c[28],in->c[2],in->c[30],in->c[31],in->c[47],in->c[33],in->c[34],in->c[44],in->c[36],in->c[42],in->c[38],in->c[39],in->c[40],in->c[41],in->c[37],in->c[43],in->c[35],in->c[45],in->c[46],in->c[32]}};
 }
 
-void rearClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[37],in->c[38],in->c[39],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[45],in->c[46],in->c[47],in->c[29],in->c[27],in->c[24],in->c[30],in->c[25],in->c[31],in->c[28],in->c[26],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[21],in->c[22],in->c[23],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[13],in->c[14],in->c[15]}};
+void rearClock(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[37],in->c[38],in->c[39],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[45],in->c[46],in->c[47],in->c[29],in->c[27],in->c[24],in->c[30],in->c[25],in->c[31],in->c[28],in->c[26],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[21],in->c[22],in->c[23],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[13],in->c[14],in->c[15]}};
 }
 
-void rearCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[45],in->c[46],in->c[47],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[37],in->c[38],in->c[39],in->c[26],in->c[28],in->c[31],in->c[25],in->c[30],in->c[24],in->c[27],in->c[29],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[13],in->c[14],in->c[15],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[21],in->c[22],in->c[23]}};
+void rearCounter(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[45],in->c[46],in->c[47],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[37],in->c[38],in->c[39],in->c[26],in->c[28],in->c[31],in->c[25],in->c[30],in->c[24],in->c[27],in->c[29],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[13],in->c[14],in->c[15],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[21],in->c[22],in->c[23]}};
 }
 
-void rearTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[21],in->c[22],in->c[23],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[13],in->c[14],in->c[15],in->c[31],in->c[30],in->c[29],in->c[28],in->c[27],in->c[26],in->c[25],in->c[24],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[45],in->c[46],in->c[47],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[37],in->c[38],in->c[39]}};
+void rearTwice(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[8],in->c[9],in->c[10],in->c[11],in->c[12],in->c[21],in->c[22],in->c[23],in->c[16],in->c[17],in->c[18],in->c[19],in->c[20],in->c[13],in->c[14],in->c[15],in->c[31],in->c[30],in->c[29],in->c[28],in->c[27],in->c[26],in->c[25],in->c[24],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[45],in->c[46],in->c[47],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[37],in->c[38],in->c[39]}};
 }
 
-void topClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[18],in->c[20],in->c[23],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[2],in->c[9],in->c[10],in->c[1],in->c[12],in->c[0],in->c[14],in->c[15],in->c[16],in->c[17],in->c[24],in->c[19],in->c[25],in->c[21],in->c[22],in->c[26],in->c[13],in->c[11],in->c[8],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[37],in->c[35],in->c[32],in->c[38],in->c[33],in->c[39],in->c[36],in->c[34],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+void topClock(state *in,state *out){
+  *out=(state){{in->c[18],in->c[20],in->c[23],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[2],in->c[9],in->c[10],in->c[1],in->c[12],in->c[0],in->c[14],in->c[15],in->c[16],in->c[17],in->c[24],in->c[19],in->c[25],in->c[21],in->c[22],in->c[26],in->c[13],in->c[11],in->c[8],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[37],in->c[35],in->c[32],in->c[38],in->c[33],in->c[39],in->c[36],in->c[34],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void topCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[13],in->c[11],in->c[8],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[26],in->c[9],in->c[10],in->c[25],in->c[12],in->c[24],in->c[14],in->c[15],in->c[16],in->c[17],in->c[0],in->c[19],in->c[1],in->c[21],in->c[22],in->c[2],in->c[18],in->c[20],in->c[23],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[34],in->c[36],in->c[39],in->c[33],in->c[38],in->c[32],in->c[35],in->c[37],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+void topCounter(state *in,state *out){
+  *out=(state){{in->c[13],in->c[11],in->c[8],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[26],in->c[9],in->c[10],in->c[25],in->c[12],in->c[24],in->c[14],in->c[15],in->c[16],in->c[17],in->c[0],in->c[19],in->c[1],in->c[21],in->c[22],in->c[2],in->c[18],in->c[20],in->c[23],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[34],in->c[36],in->c[39],in->c[33],in->c[38],in->c[32],in->c[35],in->c[37],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void topTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[24],in->c[25],in->c[26],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[23],in->c[9],in->c[10],in->c[20],in->c[12],in->c[18],in->c[14],in->c[15],in->c[16],in->c[17],in->c[13],in->c[19],in->c[11],in->c[21],in->c[22],in->c[8],in->c[0],in->c[1],in->c[2],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[39],in->c[38],in->c[37],in->c[36],in->c[35],in->c[34],in->c[33],in->c[32],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
+void topTwice(state *in,state *out){
+  *out=(state){{in->c[24],in->c[25],in->c[26],in->c[3],in->c[4],in->c[5],in->c[6],in->c[7],in->c[23],in->c[9],in->c[10],in->c[20],in->c[12],in->c[18],in->c[14],in->c[15],in->c[16],in->c[17],in->c[13],in->c[19],in->c[11],in->c[21],in->c[22],in->c[8],in->c[0],in->c[1],in->c[2],in->c[27],in->c[28],in->c[29],in->c[30],in->c[31],in->c[39],in->c[38],in->c[37],in->c[36],in->c[35],in->c[34],in->c[33],in->c[32],in->c[40],in->c[41],in->c[42],in->c[43],in->c[44],in->c[45],in->c[46],in->c[47]}};
 }
 
-void bottomClock(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[15],in->c[12],in->c[10],in->c[8],in->c[9],in->c[31],in->c[11],in->c[30],in->c[13],in->c[14],in->c[29],in->c[5],in->c[17],in->c[18],in->c[6],in->c[20],in->c[7],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[16],in->c[19],in->c[21],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[45],in->c[43],in->c[40],in->c[46],in->c[41],in->c[47],in->c[44],in->c[42]}};
+void bottomClock(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[15],in->c[12],in->c[10],in->c[8],in->c[9],in->c[31],in->c[11],in->c[30],in->c[13],in->c[14],in->c[29],in->c[5],in->c[17],in->c[18],in->c[6],in->c[20],in->c[7],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[16],in->c[19],in->c[21],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[45],in->c[43],in->c[40],in->c[46],in->c[41],in->c[47],in->c[44],in->c[42]}};
 }
 
-void bottomCounter(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[16],in->c[19],in->c[21],in->c[8],in->c[9],in->c[7],in->c[11],in->c[6],in->c[13],in->c[14],in->c[5],in->c[29],in->c[17],in->c[18],in->c[30],in->c[20],in->c[31],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[15],in->c[12],in->c[10],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[42],in->c[44],in->c[47],in->c[41],in->c[46],in->c[40],in->c[43],in->c[45]}};
+void bottomCounter(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[16],in->c[19],in->c[21],in->c[8],in->c[9],in->c[7],in->c[11],in->c[6],in->c[13],in->c[14],in->c[5],in->c[29],in->c[17],in->c[18],in->c[30],in->c[20],in->c[31],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[15],in->c[12],in->c[10],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[42],in->c[44],in->c[47],in->c[41],in->c[46],in->c[40],in->c[43],in->c[45]}};
 }
 
-void bottomTwice(state_t *in,state_t *out){
-  *out=(state_t){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[29],in->c[30],in->c[31],in->c[8],in->c[9],in->c[21],in->c[11],in->c[19],in->c[13],in->c[14],in->c[16],in->c[15],in->c[17],in->c[18],in->c[12],in->c[20],in->c[10],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[5],in->c[6],in->c[7],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[47],in->c[46],in->c[45],in->c[44],in->c[43],in->c[42],in->c[41],in->c[40]}};
+void bottomTwice(state *in,state *out){
+  *out=(state){{in->c[0],in->c[1],in->c[2],in->c[3],in->c[4],in->c[29],in->c[30],in->c[31],in->c[8],in->c[9],in->c[21],in->c[11],in->c[19],in->c[13],in->c[14],in->c[16],in->c[15],in->c[17],in->c[18],in->c[12],in->c[20],in->c[10],in->c[22],in->c[23],in->c[24],in->c[25],in->c[26],in->c[27],in->c[28],in->c[5],in->c[6],in->c[7],in->c[32],in->c[33],in->c[34],in->c[35],in->c[36],in->c[37],in->c[38],in->c[39],in->c[47],in->c[46],in->c[45],in->c[44],in->c[43],in->c[42],in->c[41],in->c[40]}};
 }
 
 //Pointers to the above transformations are in this array, so they can be invoked in loops
-void (*transformations[])(state_t*,state_t*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
+void (*transformations[])(state*,state*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
 
 //String descriptions of the transformations are stored in the same order for simplicity and rhyme/reason's sake
 char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right Twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
 
-int seed=0;
+static int seed=0;
 
-state_t shuffle(int in,int verbose){ //Performs a random virtual shuffle of some input number of moves upon the solved state and returns the shuffled state
+state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some input number of moves upon the solved state and returns the shuffled state
   if(!seed)
 	srand((seed=time(NULL)));
-  int c;
-  state_t out;
-  state_t hold;
+  state out;
+  state hold;
   int r;
-  int last;
   (transformations[(r=rand()%18)])(&solved,&out);
   if(verbose)
 	printf("%s\n",descriptions[r]);
-  for(c=0;c<in-1;++c){
-	last=r;
+  for(int c=0;c<in-1;++c){
+	int last=r;
 	r=rand()%15;
 	if(last/3<=r/3)
 		r+=3;
@@ -202,14 +199,13 @@ state_t shuffle(int in,int verbose){ //Performs a random virtual shuffle of some
 }
 
 //Prints all values of the stateList from smallest to largest
-void printStateList(stateList_t *list){
-  stateList_t *pt;
-  for(pt=list;pt;pt=pt->next)
+void printStateList(stateList *list){
+  for(stateListNode *pt=list->head;pt;pt=pt->next)
 	printState(pt->state);
 }
 
 //Returns a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
-state_t** addList(stateList_t *stateList,state_t *state){
+state** addList(stateList *list,state *s /*used to be state_t *state*/){
 /*The state_t* that is passed to this function is a pointer to a temporary and contantly-changing stack variable in the calling function,
   so saving that pointer in the list would be #verybad. A permament home for the state_t is also not made until this function confirms it is not a duplicate.
   To remedy this problem this function behaves very oddly, in my opinion. If the state is found to be a duplicate, the semaphore is released, and NULL is returned.
@@ -217,73 +213,87 @@ state_t** addList(stateList_t *stateList,state_t *state){
   is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also release the mutex semaphore after the fact.
   Is it messy? Yes. Does it work? Without problem.
   */
-  stateList_t *pt;
+/*  stateList *pt;
   int comp;
   state_t **out=NULL;
-  sem_wait(stateList->turn);
-  for(pt=stateList;(comp=compareStates(pt->state,state))==-1&&pt->next;pt=pt->next)
+  pthread_mutex_lock(list->mutex);
+  for(pt=list;(comp=compareStates(pt->state,state))==-1&&pt->next;pt=pt->next)
 	;
   if(comp==0){
-	sem_post(stateList->turn);
+	pthread_mutex_unlock(list->mutex);
 	return out;
   }
   else if(comp==-1){
-	pt->next=groupMalloc(&stateListGroup);//malloc(sizeof(stateList_t));
+	pt->next=malloc(sizeof(stateList));
 	pt=pt->next;
 	out=&pt->state;
 	pt->next=NULL;
   }
   else{
 	out=&pt->state;
-	stateList_t *n=groupMalloc(&stateListGroup);//malloc(sizeof(stateList_t));
+	stateList *n=malloc(sizeof(stateList));
 	n->state=pt->state;
 	n->next=pt->next;
 	pt->next=n;
   }
-  return out;
+  return out;*/
+  int comp;
+  pthread_mutex_lock(&list->mutex);
+  stateListNode *pt=list->head;
+  for(int tier=0;tier<48;++tier){
+	if(!pt->s[s->c[tier]])
+		return &pt->s[s->c[tier]];
+	comp=compareStates(s,pt->s[s->c[tier]]);
+	if(!comp){
+		pthread_mutex_unlock(&list->mutex);
+		return NULL;
+	}
+	if(comp==-1){
+		//push it real good
+		return &pt->next[s->c[tier]];
+	}
+	else
+		pt=pt->next[s->c[tier]];
+  }
+  return NULL; //??
 }
 
 //Frees all memory associated with the stateList
-void freeStateList(stateList_t *list){
-  stateList_t *pt,*lead;
-  pt=list; //These three lines are new
-  list=list->next;
-  free(pt); //
-  for(pt=list;pt;pt=lead){
-	lead=pt->next;
-	groupFree(&stateListGroup,pt);//free(pt);
+void freeStateList(stateList *list){
+  for(stateList *pt=list;pt;){
+	stateList *lead=pt->next;
+	free(pt);
+	pt=lead;
   }
 }
 
 //Thread-safe function to add a pointer to a new stateTreeNode_t to the BFS queue
-void treeQueueAdd(treeQueue_t *treeQueue,stateTreeNode_t *n){
-  treeQueueNode_t *node=groupMalloc(&treeQueueNodeGroup);//malloc(sizeof(treeQueueNode_t));
+void treeQueueAdd(treeQueue *treeQueue,stateTreeNode *n){
+  treeQueueNode *node=malloc(sizeof(treeQueueNode));
   node->node=n;
   node->next=NULL;
-  sem_wait(&treeQueue->turn);
+  pthread_mutex_lock(&treeQueue->mutex);
   if(treeQueue->tail){
 	treeQueue->tail->next=node;
 	treeQueue->tail=node;
   }
   else
 	treeQueue->head=treeQueue->tail=node;
-  sem_post(&treeQueue->turn);
+  pthread_mutex_unlock(&treeQueue->mutex);
+  sem_post(&treeQueue->available);
 }
 
 //Thread-safe function to remove a pointer to the oldest stateTreeNode_t from the BFS queue. Returns NULL if the queue is empty
-stateTreeNode_t* treeQueueRemove(treeQueue_t *treeQueue){
-  sem_wait(&treeQueue->turn);
-  if(!treeQueue->head){
-	sem_post(&treeQueue->turn);
-	return NULL;
-  }
-  stateTreeNode_t *out=treeQueue->head->node;
-  treeQueueNode_t *hold=treeQueue->head;
+stateTreeNode* treeQueueRemove(treeQueue *treeQueue){
+  sem_wait(&treeQueue->available);
+  pthread_mutex_lock(&treeQueue->mutex);
+  stateTreeNode *out=treeQueue->head->node;
+  treeQueueNode *hold=treeQueue->head;
   treeQueue->head=hold->next;
-  groupFree(&treeQueueNodeGroup,hold);//free(hold);
+  free(hold);
   if(!treeQueue->head)
 	treeQueue->tail=NULL;
-  sem_post(&treeQueue->turn);
+  pthread_mutex_unlock(&treeQueue->mutex);
   return out;
 }
 
@@ -291,23 +301,23 @@ stateTreeNode_t* treeQueueRemove(treeQueue_t *treeQueue){
 volatile int solutionFound=0;
 
 //This is the struct to hold the data a thread needs to perform the buildTree function properly.
-typedef struct buildTreeData{
-  stateList_t *stateList;
-  treeQueue_t *treeQueue;
+typedef struct buildTreeDataStruct{
+  stateList *stateList;
+  treeQueue *treeQueue;
   sem_t *sem;
-}buildTreeData_t;
+}buildTreeData;
 
 //This allows us to keep track of which tier of the tree we're currently processing
 volatile unsigned char currentTier=0;
 
 //This function compares two stateLists for common elements every time it is awoken by some sem_t. It blocks on some thread until solutionFound becomes 1
-state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
-  stateList_t *apt,*bpt;
+state_t listMatch(stateList *a,stateList *b,sem_t *sem){
+  stateList *apt,*bpt;
   int comp;
   while(!solutionFound){
 	sem_wait(sem);
-	sem_wait(a->turn);
-	sem_wait(b->turn);
+	pthread_mutex_lock(a->mutex);
+	pthread_mutex_lock(b->mutex);
 	apt=a;
 	bpt=b;
 	while(apt&&bpt){
@@ -315,8 +325,8 @@ state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
 		if(!comp){
 			solutionFound=1;
 			printf("Solution found. Please wait while instructions are generated\n");
-			sem_post(a->turn);
-			sem_post(b->turn);
+			pthread_mutex_unlock(a->mutex);
+			pthread_mutex_unlock(b->mutex);
 			return *(apt->state);
 		}
 		else if(comp==-1)
@@ -324,18 +334,18 @@ state_t listMatch(stateList_t *a,stateList_t *b,sem_t *sem){
 		else
 			bpt=bpt->next;
 	}
-	sem_post(a->turn);
-	sem_post(b->turn);
+	pthread_mutex_unlock(a->mutex);
+	pthread_mutex_unlock(b->mutex);
   }
   return solved;
 }
 
 //This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
 void* buildTree(void *data){
-  stateList_t *stateList=((buildTreeData_t*)data)->stateList;
-  treeQueue_t *treeQueue=((buildTreeData_t*)data)->treeQueue;
-  sem_t *sem=((buildTreeData_t*)data)->sem;
-  stateTreeNode_t *node=treeQueueRemove(treeQueue);
+  stateList *stateList=((buildTreeData*)data)->stateList;
+  treeQueue *treeQueue=((buildTreeData*)data)->treeQueue;
+  sem_t *sem=((buildTreeData*)data)->sem;
+  stateTreeNode *node=treeQueueRemove(treeQueue);
   state_t hold;
   state_t **listSlip;
   int c;
@@ -349,16 +359,16 @@ void* buildTree(void *data){
 	}
  	for(c=0;c<18;++c){
 		if(c==currentSide){
-			memcpy(&node->children[c],eightteenNulls,3*sizeof(void*));
+			node->children[c]=node->children[c+1]=node->children[c+2]=NULL;
 			c+=2;
 			continue;
 		}
 		(transformations[c])(&node->state,&hold);
 		if((listSlip=addList(stateList,&hold))){
-			node->children[c]=groupMalloc(&stateTreeNodeGroup);//malloc(sizeof(stateTreeNode_t));
+			node->children[c]=malloc(sizeof(stateTreeNode));
 			node->children[c]->state=hold;
 			*listSlip=&node->children[c]->state;
-			sem_post(stateList->turn);
+			pthread_mutex_unlock(stateList->mutex);
 			node->children[c]->tier=node->tier+1;
 			node->children[c]->side=c/3;
 			treeQueueAdd(treeQueue,node->children[c]);
@@ -371,13 +381,13 @@ void* buildTree(void *data){
   }
 //The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree.
   while((node=treeQueueRemove(treeQueue)))
-	memcpy(node->children,eightteenNulls,18*sizeof(void*));
+	memcpy(node->children,eightteenNulls,18*sizeof(stateTreeNode*));
   return NULL;
 }
 
 //This function is meant to be run by the parent thread, to insure that all of the threads running buildTree will have a first node to process
 //It returns the number of nodes added to the queue
-int buildOne(stateTreeNode_t *node,stateList_t *stateList,treeQueue_t *treeQueue){
+int buildOne(stateTreeNode *node,stateList *list,treeQueue *queue){
   state_t hold;
   state_t **listSlip;
   int c,out=0;
@@ -385,7 +395,7 @@ int buildOne(stateTreeNode_t *node,stateList_t *stateList,treeQueue_t *treeQueue
 	(transformations[c])(&node->state,&hold);
 	if((listSlip=addList(stateList,&hold))){
 		++out;
-		node->children[c]=groupMalloc(&stateTreeNodeGroup);//malloc(sizeof(stateTreeNode_t));
+		node->children[c]=malloc(sizeof(stateTreeNode));
 		node->children[c]->state=hold;
 		*listSlip=&node->children[c]->state;
 		sem_post(stateList->turn);
@@ -449,7 +459,7 @@ void recursiveFreeTree(stateTreeNode_t *tree){
   int c;
   for(c=0;c<18;++c)
   	recursiveFreeTree(tree->children[c]);
-  groupFree(&stateTreeNodeGroup,tree);//free(tree);
+  free(tree);
 }
 
 void freeTree(stateTreeNode_t *tree){
