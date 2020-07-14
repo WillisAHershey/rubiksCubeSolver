@@ -7,7 +7,6 @@
 #include <string.h>
 
 #define NUM_THREADS 30
-#define THREAD_RETURN int
 
 //enum color represents a relationship between the colors of a rubiks cube and integers 0-5
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
@@ -18,7 +17,7 @@ typedef struct stateStruct{
 }state;
 
 //Returns -1 if a<b, 0 if a=b, and 1 if a>b. This allows us to keep our stateList in order
-inline int compareStates(state *a,state *b,int tier){
+static inline int compareStates(state *a,state *b,int tier){
   for(int i=tier;i<48;++i)
 	if(a->c[i]!=b->c[i])
 		return a->c[i]<b->c[i]?-1:1;
@@ -60,7 +59,7 @@ state solved=(state){{white,white,white,white,white,white,white,white,blue,blue,
 
 //Contains a state, pointers to all 18 possible children states (in the order of the functions below), tier of node in tree, and side it was computed on by parent
 typedef struct stateTreeNodeStruct{
-  state state;
+  state s;
   unsigned char tier;
   unsigned char side;
   struct stateTreeNodeStruct *children[18];
@@ -311,21 +310,21 @@ volatile int solutionFound=0;
 
 //This is the struct to hold the data a thread needs to perform the buildTree function properly.
 typedef struct buildTreeDataStruct{
-  stateList *stateList;
-  treeQueue *treeQueue;
+  stateList *list;
+  treeQueue *queue;
 }buildTreeData;
 
 //This allows us to keep track of which tier of the tree we're currently processing
 volatile unsigned char currentTier=0;
 
 //This function compares two stateLists for common elements every time it is awoken by some sem_t. It blocks on some thread until solutionFound becomes 1
-state listMatch(stateList *a,stateList *b,sem_t *sem){
+state listMatch(stateList *a,stateList *b){
   while(1);
   //blocks forever
 }
 
 //This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
-THREAD_RETURN buildTree(void *data){
+int buildTree(void *data){
   stateList *list=((buildTreeData*)data)->list;
   treeQueue *queue=((buildTreeData*)data)->queue;
   stateTreeNode *node;
@@ -342,12 +341,13 @@ THREAD_RETURN buildTree(void *data){
 			c+=2;
 			continue;
 		}
-		(transformations[c])(&node->state,&hold);
+		state hold;
+		(transformations[c])(&node->s,&hold);
 		state **listSlip;
 		if((listSlip=addList(list,&hold))){
 			node->children[c]=malloc(sizeof(stateTreeNode));
-			node->children[c]->state=hold;
-			*listSlip=&node->children[c]->state;
+			node->children[c]->s=hold;
+			*listSlip=&node->children[c]->s;
 			mtx_unlock(&list->mutex);
 			node->children[c]->tier=node->tier+1;
 			node->children[c]->side=c/3;
@@ -360,13 +360,13 @@ THREAD_RETURN buildTree(void *data){
 //The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree.
   while((node=treeQueueTryRemove(queue)))
 	memcpy(node->children,eightteenNulls,sizeof eightteenNulls);
-  return NULL;
+  return 0;
 }
 
 //This searches the mixed tree and returns a string of instructions to get to the target state of the tree. Return string must be freed
-char* searchTree(stateTreeNode_t *tree,state_t *target){
+char* searchTree(stateTreeNode *tree,state *target){
   char *out=NULL;
-  if(!compareStates(&tree->state,target)){
+  if(!compareStates(&tree->s,target,0)){
 	out=malloc(1);
 	*out='\0';
 	return out;
@@ -386,8 +386,8 @@ char* searchTree(stateTreeNode_t *tree,state_t *target){
 }
 
 //This searches the solved tree and prints instructions on how to get from the target state to solved
-int backwardsSearchTree(stateTreeNode_t *tree,state_t *target){
-  if(!compareStates(&tree->state,target))
+int backwardsSearchTree(stateTreeNode *tree,state *target){
+  if(!compareStates(&tree->s,target,0))
 	return 1;
   int c;
   int hold;
@@ -428,34 +428,30 @@ void freeTree(stateTreeNode *tree){
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
 int main(){
-  //state_t shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
-  stateTreeNode fromMixed=(stateTreeNode){.state=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
-  stateTreeNode fromSolved=(stateTreeNode_t){.state=solved,.tier=0,.side=7};
-  stateList mixedList=(stateList){.head=NULL,.tail=NULL};
-  stateList solvedList;
-  
-  treeQueue mixedQueue=(treeQueue_t){.head=NULL,.tail=NULL};
-  treeQueue solvedQueue=(treeQueue_t){.head=NULL,.tail=NULL};
- 
-  buildTreeData_t mixedTreeData=(buildTreeData_t){.stateList=mixedList,.treeQueue=&mixedQueue,.sem=&matchSem};
-  buildTreeData_t solvedTreeData=(buildTreeData_t){.stateList=solvedList,.treeQueue=&solvedQueue,.sem=&matchSem};
-  pthread_t pids[NUM_THREADS-1];
-  int c=0,s,m;
-  m=buildOne(&fromMixed,mixedList,&mixedQueue);
-  s=buildOne(&fromSolved,solvedList,&solvedQueue);
-  while(c<NUM_THREADS-1){
-	while(m<1)
-		m=buildOne(treeQueueRemove(&mixedQueue),mixedList,&mixedQueue)-1;
-	pthread_create(&pids[c++],NULL,buildTree,&mixedTreeData);
-	--m;
-	while(s<1)
-		s=buildOne(treeQueueRemove(&solvedQueue),solvedList,&solvedQueue)-1;
-	pthread_create(&pids[c++],NULL,buildTree,&solvedTreeData);
-	--s;
+  //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
+  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
+  stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
+  stateList mixedList=(stateList){.head=NULL};
+  mtx_init(&mixedList.mutex,mtx_plain);
+  stateList solvedList=(stateList){.head=NULL};
+  mtx_init(&solvedList.mutex,mtx_plain);
+  treeQueue mixedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  mtx_init(&mixedQueue.mutex,mtx_plain);
+  sem_init(&mixedQueue.available,0,0);
+  treeQueue solvedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  mtx_init(&solvedQueue.mutex,mtx_plain);
+  sem_init(&solvedQueue.available,0,0);
+  buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
+  buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
+  thrd_t tids[NUM_THREADS-1];
+  int c;
+  for(c=0;c<NUM_THREADS-1;c+=2){
+    thrd_create(&tids[c],buildTree,(void*)&mixedTreeData);
+    thrd_create(&tids[c+1],buildTree,(void*)&solvedTreeData);
   }
-  state_t link=listMatch(mixedList,solvedList);
+  state link=listMatch(&mixedList,&solvedList);
   for(--c;c>-1;--c)
-  	pthread_join(pids[c],NULL);
+  	thrd_join(tids[c],NULL);
   char *string;
   if(!(string=searchTree(&fromMixed,&link)))
 	printf("No solution found\n");
@@ -464,12 +460,4 @@ int main(){
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
   }
-  sem_destroy(mixedList->turn);
-  sem_destroy(solvedList->turn);
-  freeStateList(mixedList);
-  freeStateList(solvedList);
-  sem_destroy(&mixedQueue.turn);
-  sem_destroy(&solvedQueue.turn);
-  freeTree(&fromMixed);
-  freeTree(&fromSolved);
 }
