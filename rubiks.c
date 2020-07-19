@@ -389,12 +389,10 @@ char* searchTree(stateTreeNode *tree,state *target){
 int backwardsSearchTree(stateTreeNode *tree,state *target){
   if(!compareStates(&tree->s,target,0))
 	return 1;
-  int c;
-  int hold;
-  for(c=0;c<18;++c)
+  for(int c=0;c<18;++c)
 	if(tree->children[c])
 		if(backwardsSearchTree(tree->children[c],target)){
-			hold=c%3;
+			int hold=c%3;
 			if(hold==0)
 				printf("%s\n",descriptions[c+1]);
 			else if(hold==1)
@@ -428,6 +426,7 @@ void freeTree(stateTreeNode *tree){
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
 int main(){
+  printf("%zd %zd\n",sizeof(mtx_t),sizeof(sem_t));
   //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
   stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
