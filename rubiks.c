@@ -209,7 +209,7 @@ state** addList(stateList *list,state *s){
   is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also release the mutex semaphore after the fact.
   Is it messy? Yes. Does it work? Without problem.
   */
-  int comp, tier=0;
+  int comp, tier;
   mtx_lock(&list->mutex);
   stateListNode *pt=list->head;
   for(tier=0;tier<48;++tier){
@@ -220,12 +220,13 @@ state** addList(stateList *list,state *s){
 		mtx_unlock(&list->mutex);
 		return NULL;
 	}
-	if(comp==-1){
+	if(comp==1){ //used to be -1
 		if(pt->next[s->c[tier]])
 			pt=pt->next[s->c[tier]];
 		else{
-			pt->next[s->c[tier]]=malloc(sizeof(stateListNode));
-			memcpy(pt->next[s->c[tier]],&emptyStateListNode,sizeof(stateListNode));
+			stateListNode *newNode=malloc(sizeof(stateListNode));
+			memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
+			pt->next[s->c[tier]]=newNode;
 			return &pt->next[s->c[tier]]->s[s->c[tier+1]];
 		}
 	}
@@ -245,8 +246,9 @@ state** addList(stateList *list,state *s){
 				push=hold;
 			}
 		}
-		pt->next[s->c[tier]]=malloc(sizeof(stateListNode));
-		memcpy(pt->next[s->c[tier]],&emptyStateListNode,sizeof(stateListNode));
+		stateListNode *newNode=malloc(sizeof(stateListNode));
+		memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
+		pt->next[s->c[tier]]=newNode;
 		pt->next[s->c[tier]]->s[s->c[tier+1]]=push;
 		return out;
 	}
@@ -255,9 +257,39 @@ state** addList(stateList *list,state *s){
   return NULL;
 }
 
+void printStateListNode(stateListNode *node){
+  for(int c=0;c<6;++c)
+  	if(node->s[c]){
+		printState(node->s[c]);
+		if(node->next[c])
+			printStateListNode(node->next[c]);
+	}
+}
+
+void printStateList(stateList *list){
+  mtx_lock(&list->mutex);
+  printf("Beginning statelist:\n");
+  printStateListNode(list->head);
+  printf("End statelist\n");
+  mtx_unlock(&list->mutex);
+}
+
 //Frees all memory associated with the stateList
+void freeStateListNode(stateListNode *node){
+  if(!node)
+	return;
+  freeStateListNode(node->next[0]);
+  freeStateListNode(node->next[1]);
+  freeStateListNode(node->next[2]);
+  freeStateListNode(node->next[3]);
+  freeStateListNode(node->next[4]);
+  freeStateListNode(node->next[5]);
+  free(node);
+}
+
 void freeStateList(stateList *list){
-  printf("freeStateList doesn't work\n");
+  mtx_destroy(&list->mutex);
+  freeStateListNode(list->head);
 }
 
 //Thread-safe function to add a pointer to a new stateTreeNode_t to the BFS queue
@@ -317,10 +349,17 @@ typedef struct buildTreeDataStruct{
 //This allows us to keep track of which tier of the tree we're currently processing
 volatile unsigned char currentTier=0;
 
+typedef struct listMatchStackStruct{
+  int index;
+  stateListNode *node;
+  struct listMatchStackStruct *next;
+}listMatchStack;
+
 //This function compares two stateLists for common elements every time it is awoken by some sem_t. It blocks on some thread until solutionFound becomes 1
 state listMatch(stateList *a,stateList *b){
-  while(1);
-  //blocks forever
+  while(1){
+	;
+  }
 }
 
 //This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
@@ -349,6 +388,7 @@ int buildTree(void *data){
 			node->children[c]->s=hold;
 			*listSlip=&node->children[c]->s;
 			mtx_unlock(&list->mutex);
+			printStateList(list);
 			node->children[c]->tier=node->tier+1;
 			node->children[c]->side=c/3;
 			treeQueueAdd(queue,node->children[c]);
@@ -425,21 +465,30 @@ void freeTree(stateTreeNode *tree){
  *Half of the threads work on solving the mixed cube, and the other work on shuffling the solved cube, until they encounter a common state
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
-int main(){
-  printf("%zd %zd\n",sizeof(mtx_t),sizeof(sem_t));
+int main1(){
   //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
   stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
-  stateList mixedList=(stateList){.head=NULL};
+  stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
+  memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&mixedList.mutex,mtx_plain);
-  stateList solvedList=(stateList){.head=NULL};
+  *addList(&mixedList,&fromMixed.s)=&fromMixed.s;
+  mtx_unlock(&mixedList.mutex);
+  stateList solvedList=(stateList){.head=malloc(sizeof(stateListNode))};
+  memcpy(solvedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&solvedList.mutex,mtx_plain);
-  treeQueue mixedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  *addList(&solvedList,&fromSolved.s)=&fromSolved.s;
+  mtx_unlock(&solvedList.mutex);
+  treeQueue mixedQueue;
+  mixedQueue.head=mixedQueue.tail=malloc(sizeof(treeQueueNode));
+  *mixedQueue.head=(treeQueueNode){.node=&fromMixed,.next=NULL};
   mtx_init(&mixedQueue.mutex,mtx_plain);
-  sem_init(&mixedQueue.available,0,0);
-  treeQueue solvedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  sem_init(&mixedQueue.available,0,1);
+  treeQueue solvedQueue;
+  solvedQueue.head=solvedQueue.tail=malloc(sizeof(treeQueueNode));
+  *solvedQueue.head=(treeQueueNode){.node=&fromSolved,.next=NULL};
   mtx_init(&solvedQueue.mutex,mtx_plain);
-  sem_init(&solvedQueue.available,0,0);
+  sem_init(&solvedQueue.available,0,1);
   buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
   buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
   thrd_t tids[NUM_THREADS-1];
@@ -459,4 +508,10 @@ int main(){
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
   }
+  return EXIT_SUCCESS;
+}
+
+int main(){
+  ;
+  //Test the addStateList() function
 }
