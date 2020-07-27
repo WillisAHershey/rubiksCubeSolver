@@ -512,6 +512,25 @@ int main1(){
 }
 
 int main(){
-  ;
-  //Test the addStateList() function
+  state hold;
+  stateList list=(stateList){.head=malloc(sizeof(stateListNode))};
+  memcpy(list.head,&emptyStateListNode,sizeof(stateListNode));
+  mtx_init(&list.mutex,mtx_plain);
+  srand(7);
+  for(int d=0;d<1000;++d){
+	for(int c=0;c<48;++c)
+		hold.c[c]=rand()%6;
+	state **spot=addList(&list,&hold);
+	if(spot){
+		*spot=malloc(sizeof(state));
+		**spot=hold;
+		mtx_unlock(&list.mutex);
+	}
+	else{
+		printf("Duplicate :");
+		printState(&hold);
+	}
+	printStateList(&list);
+	printf("\n\n");
+  }
 }
