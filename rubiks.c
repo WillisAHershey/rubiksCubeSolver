@@ -18,7 +18,7 @@ typedef struct stateStruct{
 
 //Returns -1 if a<b, 0 if a=b, and 1 if a>b. This allows us to keep our stateList in order
 static inline int compareStates(state *a,state *b,int tier){
-  for(int i=tier;i<48;++i)
+  for(int i=0/*tier*/;i<48;++i)
 	if(a->c[i]!=b->c[i])
 		return a->c[i]<b->c[i]?-1:1;
   return 0;
@@ -220,7 +220,7 @@ state** addList(stateList *list,state *s){
 		mtx_unlock(&list->mutex);
 		return NULL;
 	}
-	if(comp==1){ //used to be -1
+	if(comp==1){ //if state is greater than the one we're looking at
 		if(pt->next[s->c[tier]])
 			pt=pt->next[s->c[tier]];
 		else{
@@ -233,23 +233,23 @@ state** addList(stateList *list,state *s){
 	else{
 		state **out=&pt->s[s->c[tier]];
 		state *push=pt->s[s->c[tier]];
-		while(pt->next[s->c[tier]]){
-			pt=pt->next[s->c[tier]];
+		while(pt->next[push->c[tier]]){
+			pt=pt->next[push->c[tier]];
 			++tier;
-			if(!pt->s[s->c[tier]]){
-				pt->s[s->c[tier]]=push;
+			if(!pt->s[push->c[tier]]){
+				pt->s[push->c[tier]]=push;
 				return out;
 			}
 			else{
-				state *hold=pt->s[s->c[tier]];
-				pt->s[s->c[tier]]=push;
+				state *hold=pt->s[push->c[tier]];
+				pt->s[push->c[tier]]=push;
 				push=hold;
 			}
 		}
 		stateListNode *newNode=malloc(sizeof(stateListNode));
 		memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
-		pt->next[s->c[tier]]=newNode;
-		pt->next[s->c[tier]]->s[s->c[tier+1]]=push;
+		pt->next[push->c[tier]]=newNode;
+		pt->next[push->c[tier]]->s[push->c[tier+1]]=push;
 		return out;
 	}
   }
@@ -258,12 +258,12 @@ state** addList(stateList *list,state *s){
 }
 
 void printStateListNode(stateListNode *node){
-  for(int c=0;c<6;++c)
-  	if(node->s[c]){
+  for(int c=0;c<6;++c){
+  	if(node->s[c])
 		printState(node->s[c]);
-		if(node->next[c])
-			printStateListNode(node->next[c]);
-	}
+	if(node->next[c])
+		printStateListNode(node->next[c]);
+  }	
 }
 
 void printStateList(stateList *list){
@@ -357,8 +357,29 @@ typedef struct listMatchStackStruct{
 
 //This function compares two stateLists for common elements every time it is awoken by some sem_t. It blocks on some thread until solutionFound becomes 1
 state listMatch(stateList *a,stateList *b){
-  while(1){
-	;
+  listMatchStack *astack=NULL,bstack=NULL;
+  int aindex=0,bindex=0;
+  stateListNode *anode=a->head,*bnode=b->head;
+  while(!solutionFound){
+	int comp=compareStates(anode->s[aindex],bnode->s[bindex],0);
+	if(!comp){
+		solutionFound=1;
+		return *anode->s[aindex];
+	}
+	if(comp<0){
+		if(anode->next[aindex]){
+			listMatchStack *push=malloc(sizeof(listMatchStack));
+			*push=(listMatchStack){.index=aindex,.node=anode,.next=astack};
+			astack=push;
+			anode=anode->next[aindex];
+			aindex=-1;
+		}
+		for(++aindex;aindex<6;++aindex)
+			if(anode->s[aindex])
+				break;
+		if(aindex==6){
+			;
+		}
   }
 }
 
@@ -465,7 +486,7 @@ void freeTree(stateTreeNode *tree){
  *Half of the threads work on solving the mixed cube, and the other work on shuffling the solved cube, until they encounter a common state
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
-int main1(){
+int main(){
   //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
   stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
@@ -507,30 +528,5 @@ int main1(){
 	printf("%s\n",string);
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
-  }
-  return EXIT_SUCCESS;
-}
-
-int main(){
-  state hold;
-  stateList list=(stateList){.head=malloc(sizeof(stateListNode))};
-  memcpy(list.head,&emptyStateListNode,sizeof(stateListNode));
-  mtx_init(&list.mutex,mtx_plain);
-  srand(7);
-  for(int d=0;d<1000;++d){
-	for(int c=0;c<48;++c)
-		hold.c[c]=rand()%6;
-	state **spot=addList(&list,&hold);
-	if(spot){
-		*spot=malloc(sizeof(state));
-		**spot=hold;
-		mtx_unlock(&list.mutex);
-	}
-	else{
-		printf("Duplicate :");
-		printState(&hold);
-	}
-	printStateList(&list);
-	printf("\n\n");
   }
 }
