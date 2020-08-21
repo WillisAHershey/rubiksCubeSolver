@@ -12,7 +12,7 @@
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 
 //A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
-typedef struct stateStruct{  
+typedef struct stateStruct{
   enum color c[48];
 }state;
 
@@ -55,7 +55,7 @@ void printState(state *in){
 }
 
 //This is the solved state, the state we attempt to achieve
-state solved=(state){{white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
+state solved=(state){.c={white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
 
 //Contains a state, pointers to all 18 possible children states (in the order of the functions below), tier of node in tree, and side it was computed on by parent
 typedef struct stateTreeNodeStruct{
@@ -543,7 +543,7 @@ void freeTree(stateTreeNode *tree){
  */
 int main(){
   //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
-  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(9,1)/*shuffled*/,.tier=0,.side=7};
+  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(999,1)/*shuffled*/,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
   stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
