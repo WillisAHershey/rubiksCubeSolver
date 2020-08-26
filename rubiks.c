@@ -2,7 +2,23 @@
 #include <stdlib.h>
 #include <time.h>
 #include <semaphore.h>
-#include <threads.h>
+
+#ifdef __STDC_NO_THREADS__
+#	define THREAD_RETURN void*
+#	include <pthread.h>
+#	define thrd_t pthread_t
+#	define thrd_create(a,b,c) pthread_create(a,NULL,b,c)
+#	define thrd_join(a,b) pthread_join(a,b)
+#	define mtx_t pthread_mutex_t
+#	define mtx_init(a,b) pthread_mutex_init(a,NULL)
+#	define mtx_lock(a) pthread_mutex_lock(a)
+#	define mtx_unlock(a) pthread_mutex_unlock(a)
+#	define mtx_destroy(a) pthread_mutex_destroy(a)
+#else
+#define THREAD_RETURN int
+#	include <threads.h>
+#endif
+
 #include <unistd.h>
 #include <string.h>
 
@@ -440,7 +456,7 @@ state listMatch(stateList *a,stateList *b){
 }
 
 //This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
-int buildTree(void *data){
+THREAD_RETURN buildTree(void *data){
   stateList *list=((buildTreeData*)data)->list;
   treeQueue *queue=((buildTreeData*)data)->queue;
   stateTreeNode *node;
@@ -476,7 +492,7 @@ int buildTree(void *data){
 //The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree.
   while((node=treeQueueTryRemove(queue)))
 	memcpy(node->children,eightteenNulls,sizeof eightteenNulls);
-  return 0;
+  return (THREAD_RETURN)0;
 }
 
 //This searches the mixed tree and returns a string of instructions to get to the target state of the tree. Return string must be freed
@@ -543,7 +559,7 @@ void freeTree(stateTreeNode *tree){
  */
 int main(){
   //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
-  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(999,1)/*shuffled*/,.tier=0,.side=7};
+  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
   stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
