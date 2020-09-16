@@ -15,14 +15,14 @@
 #	define mtx_unlock(a) pthread_mutex_unlock(a)
 #	define mtx_destroy(a) pthread_mutex_destroy(a)
 #else
-#define THREAD_RETURN int
+#	define THREAD_RETURN int
 #	include <threads.h>
 #endif
 
 #include <unistd.h>
 #include <string.h>
 
-#define NUM_THREADS 30
+#define NUM_THREADS 8
 
 //enum color represents a relationship between the colors of a rubiks cube and integers 0-5
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
