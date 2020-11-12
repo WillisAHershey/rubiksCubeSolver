@@ -197,7 +197,6 @@ state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some i
   if(!seed)
 	srand((seed=time(NULL)));
   state out;
-  state hold;
   int r;
   (transformations[(r=rand()%18)])(solved,&out);
   if(verbose)
@@ -207,10 +206,9 @@ state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some i
 	r=rand()%15;
 	if(last/3<=r/3)
 		r+=3;
-	(transformations[r])(out,&hold);
+	(transformations[r])(out,&out);
 	if(verbose)
 		printf("%s\n",descriptions[r]);
-	out=hold;
   }
   return out;
 }
@@ -335,71 +333,43 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
   return out;
 }
 
-//This global variable is a signal to all threads to stop making new nodes.
+//This global variable functions as a signal to all threads to stop making new nodes
+//I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with signals someday
 volatile static int solutionFound=0;
 
-//This is the struct to hold the data a thread needs to perform the buildTree function properly.
-typedef struct buildTreeDataStruct{
-  stateList *list;
-  treeQueue *queue;
-}buildTreeData;
-
-//This allows us to keep track of which tier of the tree we're currently processing
-volatile unsigned char currentTier=0;
-
-typedef struct listMatchStackStruct{
-  int index;
-  stateListNode *node;
-  struct listMatchStackStruct *next;
-}listMatchStack;
-
-//This function compares two stateLists for common elements. It blocks on some thread until solutionFound becomes nonzero
-//It's rather spicy since the stateLists are actually m-ary trees
-//This function does not respect the mutex of either stateList
 state listMatch(stateList *a,stateList *b){
-  listMatchStack *astack=NULL,*bstack=NULL;
-  while(1){
-	int aindex,bindex;
+  //This function originally used a malloced stack for astack and bstack, but since the tree is limited to 48, I think this is less messy
+  //than calling malloc() and free() constantly on a 20-byte memspace while the other threads are busy building the trees and stateLists
+  struct listStack{int index;stateListNode *node;} astack[48],bstack[48];
+  while(!solutionFound){
+	int aindex=0,bindex=0,asindex=0,bsindex=0;
 	stateListNode *anode=a->head,*bnode=b->head;
-	for(aindex=0;aindex<6;++aindex)
+	for(;aindex<6;++aindex)
 		if(anode->s[aindex])
 			break;
-	for(bindex=0;bindex<6;++bindex)
+	for(;bindex<6;++bindex)
 		if(bnode->s[bindex])
 			break;
 	while(aindex<6&&bindex<6){
 		int comp=compareStates(anode->s[aindex],bnode->s[bindex],0);
 		if(!comp){
 			solutionFound=1;
-			while(astack){
-				listMatchStack *pop=astack;
-				astack=pop->next;
-				free(pop);
-			}
-			while(bstack){
-				listMatchStack *pop=bstack;
-				bstack=pop->next;
-				free(pop);
-			}
 			return *anode->s[aindex];
 		}
-		if(comp<0){
+		else if(comp<0){
 			if(anode->next[aindex]){
-				listMatchStack *push=malloc(sizeof(listMatchStack));
-				*push=(listMatchStack){.index=aindex,.node=anode,.next=astack};
-				astack=push;
+				astack[asindex]=(struct listStack){.index=aindex,.node=anode};
+				++asindex;
 				anode=anode->next[aindex];
 				aindex=-1;
 			}
 			for(++aindex;aindex<6;++aindex)
 				if(anode->s[aindex])
 					break;
-			while(aindex==6&&astack){
-				listMatchStack *pop=astack;
-				astack=pop->next;
-				aindex=pop->index;
-				anode=pop->node;
-				free(pop);
+			while(aindex==6&&asindex>0){
+				--asindex;
+				aindex=astack[asindex].index;
+				anode=astack[asindex].node;
 				for(++aindex;aindex<6;++aindex)
 					if(anode->s[aindex])
 						break;
@@ -407,50 +377,33 @@ state listMatch(stateList *a,stateList *b){
 		}
 		else{
 			if(bnode->next[bindex]){
-				listMatchStack *push=malloc(sizeof(listMatchStack));
-				*push=(listMatchStack){.index=bindex,.node=bnode,.next=bstack};
-				bstack=push;
+				bstack[bsindex]=(struct listStack){.index=bindex,.node=bnode};
+				++bsindex;
 				bnode=bnode->next[bindex];
 				bindex=-1;
 			}
 			for(++bindex;bindex<6;++bindex)
 				if(bnode->s[bindex])
 					break;
-			while(bindex==6&&bstack){
-				listMatchStack *pop=bstack;
-				bstack=pop->next;
-				bindex=pop->index;
-				bnode=pop->node;
-				free(pop);
+			while(bindex==6&&bsindex>0){
+				--bsindex;
+				bindex=bstack[bsindex].index;
+				bnode=bstack[bsindex].node;
 				for(++bindex;bindex<6;++bindex)
 					if(bnode->s[bindex])
 						break;
 			}
 		}
 	}
-	if(astack)
-		do{
-			listMatchStack *pop=astack;
-			astack=pop->next;
-			free(pop);
-		}while(astack);
-	else
-		while(bstack){
-			listMatchStack *pop=bstack;
-			bstack=pop->next;
-			free(pop);
-		}
   }
-  fprintf(stderr,"Infinite loop in listMatch broke\n");
+  //This can't happen, but the compiler requires a valid retval here because it doesn't know that
   return solved;
 }
 
 void buildOne(stateList *list,treeQueue *queue){
   stateTreeNode *node=treeQueueRemove(queue);
-  while(!node){
-	printf("Failed\n");
+  while(!node)
 	node=treeQueueRemove(queue);
-  }
   for(int c=0;c<18;++c){
 	state hold;
 	(transformations[c])(node->s,&hold);
@@ -468,6 +421,15 @@ void buildOne(stateList *list,treeQueue *queue){
 		node->children[c]=NULL;
   }
 }
+
+//This is the struct to hold the data a thread needs to perform the buildTree function properly.
+typedef struct buildTreeDataStruct{
+  stateList *list;
+  treeQueue *queue;
+}buildTreeData;
+
+//This allows us to keep track of which tier of the tree we're currently processing
+volatile unsigned char currentTier=0;
 
 //This is a function meant to be executed by a thread. It processes nodes from the BFS queue, and uses them to produce up to 15 more nodes to add to the queue
 THREAD_RETURN buildTree(void *data){
@@ -527,7 +489,6 @@ char* searchTree(stateTreeNode *tree,state *target){
 			out=malloc(strlen(hold)+strlen(descriptions[c])+2);
 			sprintf(out,"%s\n%s",descriptions[c],hold);
 			free(hold);
-			out[strlen(out)-1]='\0';
 			return out;
 		}
   return NULL;
@@ -573,9 +534,11 @@ void freeTree(stateTreeNode *tree){
  *Half of the threads work on solving the mixed cube, and the other work on shuffling the solved cube, until they encounter a common state
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
-int main(){
-  //state shuffled=(state_t){{b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
-  stateTreeNode fromMixed=(stateTreeNode){.s=shuffle(8,1)/*shuffled*/,.tier=0,.side=7};
+void solve(state in){
+  printf("Solving ");
+  printState(&in);
+  //state shuffled=(state_t){.c={b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
+  stateTreeNode fromMixed=(stateTreeNode){.s=in,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
   stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
@@ -599,9 +562,9 @@ int main(){
   buildOne(&solvedList,&solvedQueue);
   buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
   buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
-  thrd_t tids[NUM_THREADS-1];
+  thrd_t tids[NUM_THREADS];
   int c;
-  for(c=0;c<NUM_THREADS-1;c+=2){
+  for(c=0;c<NUM_THREADS;c+=2){
     thrd_create(&tids[c],buildTree,(void*)&mixedTreeData);
     thrd_create(&tids[c+1],buildTree,(void*)&solvedTreeData);
   }
@@ -612,6 +575,7 @@ int main(){
   if(!(string=searchTree(&fromMixed,&link)))
 	printf("No solution found\n");
   else{
+	string[strlen(string)-1]='\0';
 	printf("%s\n",string);
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
@@ -622,4 +586,38 @@ int main(){
   freeTree(&fromMixed);
   mtx_destroy(&mixedQueue.mutex);
   mtx_destroy(&solvedQueue.mutex);
+}
+
+int main(int args,char *argv[]){
+  if(args!=2&&args!=49){
+	printf("USAGE: %s ([integer]|{w,b,g,r,o,y,...})\n",argv[0]);
+  }
+  else{
+	int num=atoi(argv[1]);
+	if(!num){
+		state s;
+		for(int c=1;c<49;++c){
+			if(argv[c][0]=='w')
+				s.c[c-1]=white;
+			else if(argv[c][0]=='b')
+				s.c[c-1]=blue;
+			else if(argv[c][0]=='r')
+				s.c[c-1]=red;
+			else if(argv[c][0]=='g')
+				s.c[c-1]=green;
+			else if(argv[c][0]=='y')
+				s.c[c-1]=yellow;
+			else if(argv[c][0]=='o')
+				s.c[c-1]=orange;
+			else{
+				printf("%c\n",argv[c][0]);
+				printf("USAGE: %s ([integer]|{w,b,g,r,o,y,...})\n",argv[0]);
+				return -1;
+			}
+		}
+		solve(s);
+	}
+	else
+		solve(shuffle(num,1));
+  }
 }
