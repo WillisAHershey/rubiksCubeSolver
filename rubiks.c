@@ -202,28 +202,27 @@ state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some i
 
 //Returns a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
 state** addList(stateList *list,state *s){
-/*The state_t* that is passed to this function is a pointer to a temporary and contantly-changing stack variable in the calling function,
-  so saving that pointer in the list would be #verybad. A permament home for the state_t is also not made until this function confirms it is not a duplicate.
-  To remedy this problem this function behaves ina rather unorthidox way. If the state is found to be a duplicate, the mutex is unlocked, and NULL is returned.
+/*The state* that is passed to this function is a pointer to a temporary and contantly-changing stack variable in the calling function,
+  so saving that pointer in the list would be #verybad. A permament home for the state is also not made until this function confirms it is not a duplicate.
+  To remedy this problem this function behaves in a rather unorthidox way. If the state is found to be a duplicate, the mutex is unlocked, and NULL is returned.
   If it is found to be a new unique state, memory is allocated, and placed into the list at the correct place, a pointer to that new uninitialized memory is returned,
   and it is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also unlock the mutex after the fact.
   Is it messy? Yes. Does it work? Without problem.
   */
-  //int comp, tier;
   mtx_lock(&list->mutex);
   stateListNode *pt=list->head;
   for(int tier=0;tier<48;++tier){
-	if(!pt->s[s->c[tier]])
+	if(!pt->s[s->c[tier]]) //If the place where the state belongs in this tier is unoccupied, return it
 		return &pt->s[s->c[tier]];
-	int comp=compareStates(s,pt->s[s->c[tier]],tier);
+	int comp=compareStates(s,pt->s[s->c[tier]],tier); //Otherwise compare the state there to ours
 	if(!comp){ //If state is equal to current one in list
 		mtx_unlock(&list->mutex);
-		return NULL;
+		return NULL; //Return NULL because it is a duplicate
 	}
 	if(comp>0){ //if state is greater than current one in the list
-		if(pt->next[s->c[tier]])
-			pt=pt->next[s->c[tier]];
-		else{
+		if(pt->next[s->c[tier]]) //Continue down the tree if there is a node where we're going
+			pt=pt->next[s->c[tier]]; 
+		else{ //Otherwise make a new node, and return a pointer to the proper spot in the new node
 			stateListNode *newNode=malloc(sizeof(stateListNode));
 			memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
 			pt->next[s->c[tier]]=newNode;
@@ -231,9 +230,9 @@ state** addList(stateList *list,state *s){
 		}
 	}
 	else{ //If state is less than current one in the list
-		state **out=&pt->s[s->c[tier]];
+		state **out=&pt->s[s->c[tier]]; //Save a pointer to this occupied spot
 		state *push=pt->s[s->c[tier]];
-		while(pt->next[push->c[tier]]){
+		while(pt->next[push->c[tier]]){ //And push the state down the tree and find it a new home
 			pt=pt->next[push->c[tier]];
 			++tier;
 			if(!pt->s[push->c[tier]]){
@@ -241,11 +240,11 @@ state** addList(stateList *list,state *s){
 				return out;
 			}
 			else{
-				state *hold=pt->s[push->c[tier]];
+				state *hold=pt->s[push->c[tier]]; //Push other states down if necessary too
 				pt->s[push->c[tier]]=push;
 				push=hold;
 			}
-		}
+		} //If we eventually run out of allocated nodes, make a new one
 		stateListNode *newNode=malloc(sizeof(stateListNode));
 		memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
 		pt->next[push->c[tier]]=newNode;
