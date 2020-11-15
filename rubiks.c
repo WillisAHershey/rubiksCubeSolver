@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
+#include <malloc.h>
 
 //The following preprocessor directive allows older POSIX systems that don't have compiler support for the C11 threads.h library to compile using pthread.h
 #ifdef __STDC_NO_THREADS__
@@ -19,12 +21,9 @@
 #	include <threads.h>
 #endif
 
-#include <unistd.h>
-#include <string.h>
-
 #define NUM_THREADS 8
 
-//enum color represents a relationship between the colors of a rubiks cube and integers 0-5
+//enum color represents a mapping between the six colors of a Rubik's cube and integers 0-5
 enum color {white=0,blue=1,green=2,yellow=3,red=4,orange=5,w=0,b=1,g=2,y=3,r=4,o=5};
 
 //A state is 48 colors in a very specific order, which defines the placement of all of the colors on the cube
@@ -81,25 +80,13 @@ typedef struct stateTreeNodeStruct{
   struct stateTreeNodeStruct *children[18];
 }stateTreeNode;
 
-//Linked list node for BFS queue
-typedef struct treeQueueNodeStruct{
-  stateTreeNode *node;
-  struct treeQueueNodeStruct *next;
-}treeQueueNode;
-
-//Thread-safe structure for BFS queue
-typedef struct treeQueueStruct{
-  treeQueueNode *head;
-  treeQueueNode *tail;
-  mtx_t mutex;
-}treeQueue;
-
-//Structure/node for ordered linked-list of visited states
+//Node for m-ary tree of visited states
 typedef struct stateListNodeStruct{
   state *s[6];
   struct stateListNodeStruct *next[6];
 }stateListNode;
 
+//Thread-safe structure for m-ary tree of visited states
 typedef struct stateListStruct{
   stateListNode *head;
   mtx_t mutex;
@@ -107,7 +94,7 @@ typedef struct stateListStruct{
 
 //This is meant to be a literal stored in the data section of the executable, so we can memcpy() NULLs into an array, instead of using a loop which probs saves time
 const stateTreeNode *eightteenNulls[]={NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
-//Same story here. This is to use memcpy() on new stateListNodes in the m-ary tree stateList
+//Same story here. This is to use memcpy() into new stateListNodes in the m-ary tree stateList
 const stateListNode emptyStateListNode=(stateListNode){.s={NULL,NULL,NULL,NULL,NULL,NULL},.next={NULL,NULL,NULL,NULL,NULL,NULL}};
 
 //The following eightteen functions mutate the input state to simulate some specific turn of the cube and save the resulting state at the given address
@@ -302,6 +289,21 @@ void freeStateList(stateList *list){
   freeStateListNode(list->head);
 }
 
+#ifndef USE_MMAP
+
+//Linked list node for BFS queue
+typedef struct treeQueueNodeStruct{
+  stateTreeNode *node;
+  struct treeQueueNodeStruct *next;
+}treeQueueNode;
+
+//Thread-safe structure for BFS queue
+typedef struct treeQueueStruct{
+  treeQueueNode *head;
+  treeQueueNode *tail;
+  mtx_t mutex;
+}treeQueue;
+
 //Thread-safe function to add a pointer to a new stateTreeNode_t to the BFS queue
 void treeQueueAdd(treeQueue *queue,stateTreeNode *n){
   treeQueueNode *node=malloc(sizeof(treeQueueNode));
@@ -333,8 +335,76 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
   return out;
 }
 
+#else
+
+#include <sys/mman.h>
+#include <unistd.h>
+
+#define QUEUE_MAX ((sysconf(_SC_PAGESIZE)-sizeof(treeQueueNode*))/sizeof(stateTreeNode*))
+
+typedef struct treeQueueNodeStruct{
+  struct treeQueueNodeStruct *next;
+  stateTreeNode *nodes[];
+}treeQueueNode;
+
+typedef struct treeQueueStruct{
+  treeQueueNode *head;
+  treeQueueNode *tail;
+  int hindex;
+  int tindex;
+  mtx_t mutex;
+}treeQueue;
+
+void treeQueueAdd(treeQueue *queue,stateTreeNode *node){
+  mtx_lock(&queue->mutex);
+  if(!queue->tail){
+	treeQueueNode *n=mmap(NULL,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_SHARED,-1,0);
+	queue->head=queue->tail=n;
+	n->next=NULL;
+	queue->hindex=queue->tindex=0;
+	printf("First page %p alloced\n",n);
+  }
+  else{
+	if(queue->tindex==QUEUE_MAX){
+		treeQueueNode *n=mmap(NULL,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_SHARED,-1,0);
+		queue->tail->next=n;
+		queue->tail=n;
+		queue->tail->next=NULL;
+		queue->tindex=0;
+		printf("New page %p alloced\n",n);
+	}
+  }
+  queue->tail->nodes[queue->tindex]=node;
+  printf("Data stored at %d on %p\n",queue->tindex,queue->tail);
+  ++queue->tindex;
+  mtx_unlock(&queue->mutex);
+}
+
+stateTreeNode* treeQueueRemove(treeQueue *queue){
+  mtx_lock(&queue->mutex);
+  if(!queue->head||(queue->head==queue->tail&&queue->hindex>=queue->tindex)){
+	mtx_unlock(&queue->mutex);
+	printf("Queue empty error\n");
+	return NULL;
+  }
+  if(queue->hindex>QUEUE_MAX){
+	treeQueueNode *hold=queue->head;
+	queue->head=hold->next;
+	munmap(hold,sysconf(_SC_PAGESIZE));
+	printf("Page %p unmapped\n",hold);
+	queue->hindex=0;
+  }
+  stateTreeNode *out=queue->head->nodes[queue->hindex];
+  printf("Removed from queue at %d on %p\n",queue->hindex,queue->head);
+  ++queue->hindex;
+  mtx_unlock(&queue->mutex);
+  return out;
+}
+
+#endif
+
 //This global variable functions as a signal to all threads to stop making new nodes
-//I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with signals someday
+//I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with actual signals someday
 volatile static int solutionFound=0;
 
 state listMatch(stateList *a,stateList *b){
@@ -443,7 +513,7 @@ THREAD_RETURN buildTree(void *data){
 	unsigned char currentSide=node->side*3;
  	if(node->tier>currentTier){
 		currentTier=node->tier;
-		printf("Beginning tier %d\n",(int)currentTier);
+		printf("Starting tier %d\n",node->tier);
 	}
  	for(int c=0;c<18;++c){
 		if(c==currentSide){
@@ -537,40 +607,49 @@ void freeTree(stateTreeNode *tree){
 void solve(state in){
   printf("Solving ");
   printState(&in);
-  //state shuffled=(state_t){.c={b,o,b,y,y,y,b,g,w,g,g,r,o,w,b,r,r,r,y,o,w,o,w,b,r,g,b,g,y,w,o,w,o,w,o,b,w,y,r,r,o,r,y,b,g,g,y,g}};
+  //These are the first nodes to go in each tree. One with the solved state and one with the shuffled state
+  //There is no tree structure, as there is only one root, and there is no need for mutex, as each thread will be working on a different leaf at all times
   stateTreeNode fromMixed=(stateTreeNode){.s=in,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
+  //The stateList is set up for the mixed tree, with the initial shuffled state as the only state
   stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&mixedList.mutex,mtx_plain);
-  *addList(&mixedList,&fromMixed.s)=&fromMixed.s;
-  mtx_unlock(&mixedList.mutex);
+  *addList(&mixedList,&fromMixed.s)=&fromMixed.s; //The list is empty to we assume it will not return NULL
+  mtx_unlock(&mixedList.mutex); //When addList() doesn't return NULL we must unlock the mutex
+  //The stateList is set up for the solved tree, with the solved state as the only state
   stateList solvedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(solvedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&solvedList.mutex,mtx_plain);
-  *addList(&solvedList,&fromSolved.s)=&fromSolved.s;
-  mtx_unlock(&solvedList.mutex);
-  treeQueue mixedQueue;
-  mixedQueue.head=mixedQueue.tail=malloc(sizeof(treeQueueNode));
-  *mixedQueue.head=(treeQueueNode){.node=&fromMixed,.next=NULL};
+  *addList(&solvedList,&fromSolved.s)=&fromSolved.s; //The list is empty, so we assume it will not return NULL
+  mtx_unlock(&solvedList.mutex); //When addList() doesn't return NULL we must unlock the mutex
+  //Queue for running BFS on the mixed stateTree is set up with the first node of the tree as the only node in the queue
+  treeQueue mixedQueue=(treeQueue){.head=NULL,.tail=NULL};
   mtx_init(&mixedQueue.mutex,mtx_plain);
-  treeQueue solvedQueue;
-  solvedQueue.head=solvedQueue.tail=malloc(sizeof(treeQueueNode));
-  *solvedQueue.head=(treeQueueNode){.node=&fromSolved,.next=NULL};
+  treeQueueAdd(&mixedQueue,&fromMixed);
+  //Queue for running BFS on the solved stateTree is set up with the first node of the tree as the only node in the queue
+  treeQueue solvedQueue=(treeQueue){.head=NULL,.tail=NULL};
   mtx_init(&solvedQueue.mutex,mtx_plain);
+  treeQueueAdd(&solvedQueue,&fromSolved);
+  //Control manually processes one node in each tree (which produces 18 more nodes in each tree and each queue)
   buildOne(&mixedList,&mixedQueue);
   buildOne(&solvedList,&solvedQueue);
+  //These are so we can pass data to our threads using void* as the C11 standard threads.h library mandates
   buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
   buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
-  thrd_t tids[NUM_THREADS];
+  //Produces NUM_THREADS or NUM_THREADS+1 threads, half of which work on the shuffled tree, and half of which work on the solved tree
+  thrd_t tids[NUM_THREADS+1];
   int c;
   for(c=0;c<NUM_THREADS;c+=2){
     thrd_create(&tids[c],buildTree,(void*)&mixedTreeData);
     thrd_create(&tids[c+1],buildTree,(void*)&solvedTreeData);
   }
+  //Control blocks here until a match is found in the two stateLists
   state link=listMatch(&mixedList,&solvedList);
+  //When a match is found, the threads work together to set all the pointers at the bottom of the trees to NULL, before terminating, and being joined here
   for(--c;c>-1;--c)
   	thrd_join(tids[c],NULL);
+  //The instructions are then computed using the two trees
   char *string;
   if(!(string=searchTree(&fromMixed,&link)))
 	printf("No solution found\n");
@@ -580,6 +659,8 @@ void solve(state in){
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
   }
+
+  //This is all cleanup
   freeStateList(&solvedList);
   freeStateList(&mixedList);
   freeTree(&fromSolved);
@@ -588,6 +669,9 @@ void solve(state in){
   mtx_destroy(&solvedQueue.mutex);
 }
 
+//This program is written to accept either an integer, or a complete state of 48 colors
+//If an integer n is entered, a virtual random shuffle of n moves is done on the solved state, and the program tries to solve that cube
+//Otherwise, the program tries to solve the given state
 int main(int args,char *argv[]){
   if(args!=2&&args!=49){
 	printf("USAGE: %s ([integer]|{w,b,g,r,o,y,...})\n",argv[0]);
