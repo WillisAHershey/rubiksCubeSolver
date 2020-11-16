@@ -1,3 +1,6 @@
+//Willis A. Hershey
+//WillisAHershey@gmail.com
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -70,13 +73,13 @@ void printState(state *in){
 }
 
 //This is the solved state, the state we attempt to achieve
-const state solved=(state){.c={white,white,white,white,white,white,white,white,blue,blue,blue,blue,blue,blue,blue,blue,green,green,green,green,green,green,green,green,yellow,yellow,yellow,yellow,yellow,yellow,yellow,yellow,red,red,red,red,red,red,red,red,orange,orange,orange,orange,orange,orange,orange,orange}}; 
+const state solved=(state){.c={w,w,w,w,w,w,w,w,b,b,b,b,b,b,b,b,g,g,g,g,g,g,g,g,y,y,y,y,y,y,y,y,r,r,r,r,r,r,r,r,o,o,o,o,o,o,o,o}}; 
 
 //Contains a state, pointers to all 18 possible children states (in the order of the functions below), tier of node in tree, and side it was computed on by parent
 typedef struct stateTreeNodeStruct{
   state s;
-  unsigned char tier;
-  unsigned char side;
+  unsigned char tier:4;
+  unsigned char side:3;
   struct stateTreeNodeStruct *children[18];
 }stateTreeNode;
 
