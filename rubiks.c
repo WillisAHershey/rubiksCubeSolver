@@ -260,24 +260,6 @@ state** addList(stateList *list,state *s){
   return NULL;
 }
 
-//The following two functions work together to recursively print all the states in the list
-void printStateListNode(stateListNode *node){
-  for(int c=0;c<6;++c)
-  	if(node->s[c]){
-		printState(node->s[c]);
-		if(node->next[c])
-			printStateListNode(node->next[c]);	
-	}
-}
-
-void printStateList(stateList *list){
-  mtx_lock(&list->mutex);
-  printf("Beginning statelist:\n");
-  printStateListNode(list->head);
-  printf("End statelist\n");
-  mtx_unlock(&list->mutex);
-}
-
 //Frees all memory associated with the stateList
 void freeStateListNode(stateListNode *node){
   for(int c=0;c<6;++c)
@@ -338,7 +320,7 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
 }
 
 #else
-
+//This is where I will finish implementing the mmapped treeQueue
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -495,7 +477,7 @@ void buildOne(stateList *list,treeQueue *queue){
 }
 
 //This is the struct to hold the data a thread needs to perform the buildTree function properly.
-typedef struct buildTreeDataStruct{
+typedef struct{
   stateList *list;
   treeQueue *queue;
 }buildTreeData;
@@ -677,6 +659,7 @@ void solve(state in){
 int main(int args,char *argv[]){
   if(args!=2&&args!=49){
 	printf("USAGE: %s ([integer]|{w,b,g,r,o,y,...})\n",argv[0]);
+	exit(EXIT_FAILURE);
   }
   else{
 	int num=atoi(argv[1]);
@@ -696,9 +679,9 @@ int main(int args,char *argv[]){
 			else if(argv[c][0]=='o')
 				s.c[c-1]=orange;
 			else{
-				printf("%c\n",argv[c][0]);
+				printf("Character '%c' not understood\n",argv[c][0]);
 				printf("USAGE: %s ([integer]|{w,b,g,r,o,y,...})\n",argv[0]);
-				return -1;
+				exit(EXIT_FAILURE);
 			}
 		}
 		solve(s);
