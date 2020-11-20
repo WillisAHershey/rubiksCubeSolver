@@ -273,65 +273,28 @@ void freeStateList(stateList *list){
   freeStateListNode(list->head);
 }
 
-#ifndef USE_MMAP
+#define USE_MMAP
 
-//Linked list node for BFS queue
-typedef struct treeQueueNodeStruct{
-  stateTreeNode *node;
-  struct treeQueueNodeStruct *next;
-}treeQueueNode;
-
-//Thread-safe structure for BFS queue
-typedef struct treeQueueStruct{
-  treeQueueNode *head;
-  treeQueueNode *tail;
-  mtx_t mutex;
-}treeQueue;
-
-//Thread-safe function to add a pointer to a new stateTreeNode_t to the BFS queue
-void treeQueueAdd(treeQueue *queue,stateTreeNode *n){
-  treeQueueNode *node=malloc(sizeof(treeQueueNode));
-  *node=(treeQueueNode){.node=n,.next=NULL};
-  mtx_lock(&queue->mutex);
-  if(queue->tail){
-	queue->tail->next=node;
-	queue->tail=node;
-  }
-  else
-	queue->head=queue->tail=node;
-  mtx_unlock(&queue->mutex);
-}
-
-//Thread-safe function to remove a pointer to the oldest stateTreeNode_t from the BFS queue. Blocks if the queue is empty
-stateTreeNode* treeQueueRemove(treeQueue *queue){
-  mtx_lock(&queue->mutex);
-  if(!queue->head){
-	mtx_unlock(&queue->mutex);
-	return NULL;
-  }
-  stateTreeNode *out=queue->head->node;
-  treeQueueNode *hold=queue->head;
-  queue->head=hold->next;
-  free(hold);
-  if(!queue->head)
-	queue->tail=NULL;
-  mtx_unlock(&queue->mutex);
-  return out;
-}
-
+//This preprocessor directive allows the contiguous-memory implementation of the queue to use either mmap() or malloc()
+#ifdef USE_MMAP
+#	include <unistd.h>
+#	include <sys/mman.h>
+#	define ALLOCATE_TREE_QUEUE_NODE mmap(NULL,4*sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0)
+#	define DEALLOCATE_TREE_QUEUE_NODE(c) munmap(c,4*sysconf(_SC_PAGE_SIZE))
+#	define TREE_QUEUE_NODE_MAX_INDEX ((4*sysconf(_SC_PAGE_SIZE)-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
 #else
-//This is where I will finish implementing the mmapped treeQueue
-#include <sys/mman.h>
-#include <unistd.h>
-
-#define QUEUE_MAX ((sysconf(_SC_PAGESIZE)-sizeof(treeQueueNode*))/sizeof(stateTreeNode*))
-
+#	define ALLOCATE_TREE_QUEUE_NODE malloc(16376)
+#	define DEALLOCATE_TREE_QUEUE_NODE(c) free(c)
+#	define TREE_QUEUE_NODE_MAX_INDEX ((16376-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
+#endif
+//A treeQueueNode is intented to occupy some arbitrary amount of memory, wasting only sizeof(void*) for linked-list-ness
 typedef struct treeQueueNodeStruct{
   struct treeQueueNodeStruct *next;
   stateTreeNode *nodes[];
 }treeQueueNode;
 
-typedef struct treeQueueStruct{
+//Thread-safe struct for queue with head and tail pointers to treeQueueNodes, vzlues for head index and tail index, and a mutex
+typedef struct{
   treeQueueNode *head;
   treeQueueNode *tail;
   int hindex;
@@ -339,53 +302,45 @@ typedef struct treeQueueStruct{
   mtx_t mutex;
 }treeQueue;
 
+//Adds a stateTreeNode* to a valid treeQueue. Most likely segfaults on memory allocation failure
 void treeQueueAdd(treeQueue *queue,stateTreeNode *node){
   mtx_lock(&queue->mutex);
-  if(!queue->tail){
-	treeQueueNode *n=mmap(NULL,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_SHARED,-1,0);
-	queue->head=queue->tail=n;
+  if(queue->tindex>=TREE_QUEUE_NODE_MAX_INDEX){
+	treeQueueNode *n=ALLOCATE_TREE_QUEUE_NODE;
 	n->next=NULL;
-	queue->hindex=queue->tindex=0;
-	printf("First page %p alloced\n",n);
-  }
-  else{
-	if(queue->tindex==QUEUE_MAX){
-		treeQueueNode *n=mmap(NULL,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_SHARED,-1,0);
-		queue->tail->next=n;
-		queue->tail=n;
-		queue->tail->next=NULL;
-		queue->tindex=0;
-		printf("New page %p alloced\n",n);
-	}
+	queue->tail->next=n;
+	queue->tail=n;
+	queue->tindex=0;
   }
   queue->tail->nodes[queue->tindex]=node;
-  printf("Data stored at %d on %p\n",queue->tindex,queue->tail);
   ++queue->tindex;
   mtx_unlock(&queue->mutex);
 }
 
+//Removes a stateTreeNode* from a valid treeQueue. Returns NULL when the queue is empty
 stateTreeNode* treeQueueRemove(treeQueue *queue){
   mtx_lock(&queue->mutex);
-  if(!queue->head||(queue->head==queue->tail&&queue->hindex>=queue->tindex)){
+  stateTreeNode *out;
+  if(queue->tail==queue->head&&queue->hindex>=queue->tindex){
+	queue->hindex=queue->tindex=0; //If the queue is empty, and the indices are some arbitrary value, we can simply start back at 0 to save overhead
 	mtx_unlock(&queue->mutex);
-	printf("Queue empty error\n");
-	return NULL;
+	out=NULL;
   }
-  if(queue->hindex>QUEUE_MAX){
+  else if(queue->hindex>=TREE_QUEUE_NODE_MAX_INDEX){
 	treeQueueNode *hold=queue->head;
 	queue->head=hold->next;
-	munmap(hold,sysconf(_SC_PAGESIZE));
-	printf("Page %p unmapped\n",hold);
-	queue->hindex=0;
+	queue->hindex=1;
+	out=queue->head->nodes[0];
+	mtx_unlock(&queue->mutex);
+	DEALLOCATE_TREE_QUEUE_NODE(hold);
   }
-  stateTreeNode *out=queue->head->nodes[queue->hindex];
-  printf("Removed from queue at %d on %p\n",queue->hindex,queue->head);
-  ++queue->hindex;
-  mtx_unlock(&queue->mutex);
+  else{
+	out=queue->head->nodes[queue->hindex];
+	++queue->hindex;
+	mtx_unlock(&queue->mutex);
+  }
   return out;
 }
-
-#endif
 
 //This global variable functions as a signal to all threads to stop making new nodes
 //I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with actual signals someday
@@ -588,11 +543,11 @@ void freeTree(stateTreeNode *tree){
  *Half of the threads work on solving the mixed cube, and the other work on shuffling the solved cube, until they encounter a common state
  *When that common state is found, all threads terminate and the trees are compared to create a list of results.
  */
-void solve(state in){
+void solve(state in,int cleanup){
   printf("Solving ");
   printState(&in);
   //These are the first nodes to go in each tree. One with the solved state and one with the shuffled state
-  //There is no tree structure, as there is only one root, and there is no need for mutex, as each thread will be working on a different leaf at all times
+  //There is no tree struct, as there is only one root, and there is no need for mutex, as each thread will be working on a different leaf at all times
   stateTreeNode fromMixed=(stateTreeNode){.s=in,.tier=0,.side=7};
   stateTreeNode fromSolved=(stateTreeNode){.s=solved,.tier=0,.side=7};
   //The stateList is set up for the mixed tree, with the initial shuffled state as the only state
@@ -608,11 +563,15 @@ void solve(state in){
   *addList(&solvedList,&fromSolved.s)=&fromSolved.s; //The list is empty, so we assume it will not return NULL
   mtx_unlock(&solvedList.mutex); //When addList() doesn't return NULL we must unlock the mutex
   //Queue for running BFS on the mixed stateTree is set up with the first node of the tree as the only node in the queue
-  treeQueue mixedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  treeQueue mixedQueue;
+  mixedQueue.head=mixedQueue.tail=ALLOCATE_TREE_QUEUE_NODE;
+  mixedQueue.hindex=mixedQueue.tindex=0;
   mtx_init(&mixedQueue.mutex,mtx_plain);
   treeQueueAdd(&mixedQueue,&fromMixed);
   //Queue for running BFS on the solved stateTree is set up with the first node of the tree as the only node in the queue
-  treeQueue solvedQueue=(treeQueue){.head=NULL,.tail=NULL};
+  treeQueue solvedQueue;
+  solvedQueue.head=solvedQueue.tail=ALLOCATE_TREE_QUEUE_NODE;
+  solvedQueue.hindex=solvedQueue.tindex=0;
   mtx_init(&solvedQueue.mutex,mtx_plain);
   treeQueueAdd(&solvedQueue,&fromSolved);
   //Control manually processes one node in each tree (which produces 18 more nodes in each tree and each queue)
@@ -643,14 +602,18 @@ void solve(state in){
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
   }
-
-  //This is all cleanup
-  freeStateList(&solvedList);
-  freeStateList(&mixedList);
-  freeTree(&fromSolved);
-  freeTree(&fromMixed);
-  mtx_destroy(&mixedQueue.mutex);
-  mtx_destroy(&solvedQueue.mutex);
+  //This is all cleanup and is unnecessary if the program is being torn down right now
+  //It is up to the calling function to ensure that if several cubes are being solved in one run, that cleanup should really be done between cubes
+  if(cleanup){
+  	freeStateList(&solvedList);
+  	freeStateList(&mixedList);
+  	freeTree(&fromSolved);
+  	freeTree(&fromMixed);
+  	DEALLOCATE_TREE_QUEUE_NODE(mixedQueue.head);
+  	DEALLOCATE_TREE_QUEUE_NODE(solvedQueue.head);
+  	mtx_destroy(&mixedQueue.mutex);
+  	mtx_destroy(&solvedQueue.mutex);
+  }
 }
 
 //This program is written to accept either an integer, or a complete state of 48 colors
@@ -684,9 +647,9 @@ int main(int args,char *argv[]){
 				exit(EXIT_FAILURE);
 			}
 		}
-		solve(s);
+		solve(s,0);
 	}
 	else
-		solve(shuffle(num,1));
+		solve(shuffle(num,1),0);
   }
 }
