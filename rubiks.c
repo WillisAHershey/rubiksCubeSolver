@@ -510,13 +510,17 @@ int backwardsSearchTree(stateTreeNode *tree,state *target){
   for(int c=0;c<18;++c)
 	if(tree->children[c])
 		if(backwardsSearchTree(tree->children[c],target)){
-			int hold=c%3;
-			if(hold==0)
-				printf("%s\n",descriptions[c+1]);
-			else if(hold==1)
-				printf("%s\n",descriptions[c-1]);
-			else
-				printf("%s\n",descriptions[c]);
+			switch(c%3){
+				case 0:
+					printf("%s\n",descriptions[c+1]);
+					break;
+				case 1:
+					printf("%s\n",descriptions[c-1]);
+					break;
+				case 2:
+					printf("%s\n",descriptions[c]);
+					break;
+			}
 			return 1;
 		}
   return 0;
@@ -526,15 +530,13 @@ int backwardsSearchTree(stateTreeNode *tree,state *target){
 void recursiveFreeTree(stateTreeNode *tree){
   if(!tree)
 	return;
-  int c;
-  for(c=0;c<18;++c)
+  for(int c=0;c<18;++c)
   	recursiveFreeTree(tree->children[c]);
   free(tree);
 }
 
 void freeTree(stateTreeNode *tree){
-  int c;
-  for(c=0;c<18;++c)
+  for(int c=0;c<18;++c)
   	recursiveFreeTree(tree->children[c]);
 }
 
@@ -578,8 +580,8 @@ void solve(state in,int cleanup){
   buildOne(&mixedList,&mixedQueue);
   buildOne(&solvedList,&solvedQueue);
   //These are so we can pass data to our threads using void* as the C11 standard threads.h library mandates
-  buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
-  buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
+  auto buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
+  auto buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
   //Produces NUM_THREADS or NUM_THREADS+1 threads, half of which work on the shuffled tree, and half of which work on the solved tree
   thrd_t tids[NUM_THREADS+1];
   int c;
