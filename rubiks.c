@@ -293,7 +293,7 @@ typedef struct treeQueueNodeStruct{
   stateTreeNode *nodes[];
 }treeQueueNode;
 
-//Thread-safe struct for queue with head and tail pointers to treeQueueNodes, vzlues for head index and tail index, and a mutex
+//Thread-safe struct for queue with head and tail pointers to treeQueueNodes, values for head index and tail index, and a mutex
 typedef struct{
   treeQueueNode *head;
   treeQueueNode *tail;
@@ -361,11 +361,11 @@ state listMatch(stateList *a,stateList *b){
 			break;
 	while(aindex<6&&bindex<6){
 		int comp=compareStates(anode->s[aindex],bnode->s[bindex],0);
-		if(!comp){
+		if(!comp){ //If comp is zero then the two states are equivalent and we've found a match
 			solutionFound=1;
 			return *anode->s[aindex];
 		}
-		else if(comp<0){
+		else if(comp<0){ //If comp < 0 it means the state in list a is less than the state in list b, so we move forward one in a
 			if(anode->next[aindex]){
 				astack[asindex]=(struct listStack){.index=aindex,.node=anode};
 				++asindex;
@@ -384,7 +384,7 @@ state listMatch(stateList *a,stateList *b){
 						break;
 			}
 		}
-		else{
+		else{ //This means the state in list b is less than the state in list a, so we move forward one in list b
 			if(bnode->next[bindex]){
 				bstack[bsindex]=(struct listStack){.index=bindex,.node=bnode};
 				++bsindex;
@@ -409,6 +409,7 @@ state listMatch(stateList *a,stateList *b){
   return solved;
 }
 
+//This is called by the main thread before the other threads are spawned to ensure that there are nodes in the list to process when they are created
 void buildOne(stateList *list,treeQueue *queue){
   stateTreeNode *node=treeQueueRemove(queue);
   while(!node)
