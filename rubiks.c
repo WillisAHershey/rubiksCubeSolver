@@ -7,7 +7,8 @@
 #include <string.h>
 #include <malloc.h>
 
-//The following preprocessor directive allows older POSIX systems that don't have compiler support for the C11 threads.h library to compile using pthread.h
+//The following preprocessor directive allows older POSIX systems that don't have compiler support for the
+//C11 threads.h library to compile using pthread.h, since there is an almost one-to-one correspondence
 #ifdef __STDC_NO_THREADS__
 #	define THREAD_RETURN void*
 #	include <pthread.h>
@@ -209,7 +210,7 @@ state** addList(stateList *list,state *s){
   so saving that pointer in the list would be #verybad. A permament home for the state is also not made until this function confirms it is not a duplicate.
   To remedy this problem this function behaves in a rather unorthidox way. If the state is found to be a duplicate, the mutex is unlocked, and NULL is returned.
   If it is found to be a new unique state, memory is allocated, and placed into the list at the correct place, a pointer to that new uninitialized memory is returned,
-  and it is up to the calling function to save a pointer to the permament home of the new state_t at the address returned, and also unlock the mutex after the fact.
+  and it is up to the calling function to save a pointer to the permament home of the new state at the address returned, and also unlock the mutex after the fact.
   Is it messy? Yes. Does it work? Without problem.
   */
   mtx_lock(&list->mutex);
@@ -287,7 +288,7 @@ void freeStateList(stateList *list){
 #	define DEALLOCATE_TREE_QUEUE_NODE(c) free(c)
 #	define TREE_QUEUE_NODE_MAX_INDEX ((16376-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
 #endif
-//A treeQueueNode is intented to occupy some arbitrary amount of memory, wasting only sizeof(void*) for linked-list-ness
+//A treeQueueNode is intended to occupy some arbitrary amount of memory, wasting only sizeof(void*) for linked-list-ness
 typedef struct treeQueueNodeStruct{
   struct treeQueueNodeStruct *next;
   stateTreeNode *nodes[];
@@ -346,6 +347,7 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
 //I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with actual signals someday
 volatile static int solutionFound=0;
 
+//This function compares two stateLists in a loop until a state is found that is present in both lists. When that duplicate state is found, it is returned
 state listMatch(stateList *a,stateList *b){
   //This function originally used a malloced stack for astack and bstack, but since the tree is limited to 48, I think this is less messy
   //than calling malloc() and free() constantly on a 20-byte memspace while the other threads are busy building the trees and stateLists
@@ -367,8 +369,7 @@ state listMatch(stateList *a,stateList *b){
 		}
 		else if(comp<0){ //If comp < 0 it means the state in list a is less than the state in list b, so we move forward one in a
 			if(anode->next[aindex]){
-				astack[asindex]=(struct listStack){.index=aindex,.node=anode};
-				++asindex;
+				astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
 				anode=anode->next[aindex];
 				aindex=-1;
 			}
@@ -376,8 +377,7 @@ state listMatch(stateList *a,stateList *b){
 				if(anode->s[aindex])
 					break;
 			while(aindex==6&&asindex>0){
-				--asindex;
-				aindex=astack[asindex].index;
+				aindex=astack[--asindex].index;
 				anode=astack[asindex].node;
 				for(++aindex;aindex<6;++aindex)
 					if(anode->s[aindex])
@@ -386,8 +386,7 @@ state listMatch(stateList *a,stateList *b){
 		}
 		else{ //This means the state in list b is less than the state in list a, so we move forward one in list b
 			if(bnode->next[bindex]){
-				bstack[bsindex]=(struct listStack){.index=bindex,.node=bnode};
-				++bsindex;
+				bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
 				bnode=bnode->next[bindex];
 				bindex=-1;
 			}
@@ -395,8 +394,7 @@ state listMatch(stateList *a,stateList *b){
 				if(bnode->s[bindex])
 					break;
 			while(bindex==6&&bsindex>0){
-				--bsindex;
-				bindex=bstack[bsindex].index;
+				bindex=bstack[--bsindex].index;
 				bnode=bstack[bsindex].node;
 				for(++bindex;bindex<6;++bindex)
 					if(bnode->s[bindex])
