@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
-#include <malloc.h>
 
 //The following preprocessor directive allows older POSIX systems that don't have compiler support for the
 //C11 threads.h library to compile using pthread.h, since there is an almost one-to-one correspondence
@@ -178,10 +177,10 @@ void bottomTwice(state in,state *out){
 }
 
 //This array of function pointers allows us to invoke the above 18 functions in loops
-void (* const transformations[])(state,state*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
+void (*const transformations[])(state,state*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
 
 //String descriptions of the transformations in the array of function pointers are stored here in the same order for simplicity and rhyme/reason's sake
-char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right Twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
+const char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right Twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
 
 state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some input number of moves upon the solved state and returns the shuffled state
   static int seed=0;
@@ -407,29 +406,6 @@ state listMatch(stateList *a,stateList *b){
   return solved;
 }
 
-//This is called by the main thread before the other threads are spawned to ensure that there are nodes in the list to process when they are created
-void buildOne(stateList *list,treeQueue *queue){
-  stateTreeNode *node=treeQueueRemove(queue);
-  while(!node)
-	node=treeQueueRemove(queue);
-  for(int c=0;c<18;++c){
-	state hold;
-	(transformations[c])(node->s,&hold);
-	state **listSlip;
-	if((listSlip=addList(list,&hold))){
-		node->children[c]=malloc(sizeof(stateTreeNode));
-		node->children[c]->s=hold;
-		*listSlip=&node->children[c]->s;
-		mtx_unlock(&list->mutex);
-		node->children[c]->tier=node->tier+1;
-		node->children[c]->side=c/3;
-		treeQueueAdd(queue,node->children[c]);
-	}
-	else
-		node->children[c]=NULL;
-  }
-}
-
 //This is the struct to hold the data a thread needs to perform the buildTree function properly.
 typedef struct{
   stateList *list;
@@ -443,9 +419,8 @@ volatile unsigned char currentTier=0;
 THREAD_RETURN buildTree(void *data){
   stateList *list=((buildTreeData*)data)->list;
   treeQueue *queue=((buildTreeData*)data)->queue;
-  stateTreeNode *node;
   while(!solutionFound){
-	node=treeQueueRemove(queue);
+	stateTreeNode *node=treeQueueRemove(queue);
 	if(!node)
 		continue;
 	unsigned char currentSide=node->side*3;
@@ -476,6 +451,7 @@ THREAD_RETURN buildTree(void *data){
 	}
   }
 //The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree.
+  stateTreeNode *node;
   while((node=treeQueueRemove(queue)))
 	memcpy(node->children,eightteenNulls,sizeof eightteenNulls);
   return (THREAD_RETURN)0;
@@ -575,9 +551,6 @@ void solve(state in,int cleanup){
   solvedQueue.hindex=solvedQueue.tindex=0;
   mtx_init(&solvedQueue.mutex,mtx_plain);
   treeQueueAdd(&solvedQueue,&fromSolved);
-  //Control manually processes one node in each tree (which produces 18 more nodes in each tree and each queue)
-  buildOne(&mixedList,&mixedQueue);
-  buildOne(&solvedList,&solvedQueue);
   //These are so we can pass data to our threads using void* as the C11 standard threads.h library mandates
   auto buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
   auto buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
