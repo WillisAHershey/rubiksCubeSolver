@@ -551,15 +551,12 @@ void solve(state in,int cleanup){
   solvedQueue.hindex=solvedQueue.tindex=0;
   mtx_init(&solvedQueue.mutex,mtx_plain);
   treeQueueAdd(&solvedQueue,&fromSolved);
-  //These are so we can pass data to our threads using void* as the C11 standard threads.h library mandates
-  auto buildTreeData mixedTreeData=(buildTreeData){.list=&mixedList,.queue=&mixedQueue};
-  auto buildTreeData solvedTreeData=(buildTreeData){.list=&solvedList,.queue=&solvedQueue};
   //Produces NUM_THREADS or NUM_THREADS+1 threads, half of which work on the shuffled tree, and half of which work on the solved tree
-  thrd_t tids[NUM_THREADS+1];
+  thrd_t tids[NUM_THREADS+1];															{ //Limiting the scope if int c from here
   int c;
   for(c=0;c<NUM_THREADS;c+=2){
-    thrd_create(&tids[c],buildTree,(void*)&mixedTreeData);
-    thrd_create(&tids[c+1],buildTree,(void*)&solvedTreeData);
+    thrd_create(&tids[c],buildTree,&(buildTreeData){.list=&mixedList,.queue=&mixedQueue});	//Implicit compound literals are used instead of explicit stack structs
+    thrd_create(&tids[c+1],buildTree,&(buildTreeData){.list=&solvedList,.queue=&solvedQueue});
   }
   //Control blocks here until a match is found in the two stateLists
   state link=listMatch(&mixedList,&solvedList);
@@ -575,7 +572,7 @@ void solve(state in,int cleanup){
 	printf("%s\n",string);
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
-  }
+  }																		} // to here
   //This is all cleanup and is unnecessary if the program is being torn down right now
   //It is up to the calling function to ensure that if several cubes are being solved in one run, that cleanup should really be done between cubes
   if(cleanup){
