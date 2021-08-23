@@ -297,6 +297,7 @@ typedef struct treeQueueNodeStruct{
 typedef struct{
   treeQueueNode *head;
   treeQueueNode *tail;
+  void *blankPage;
   int hindex;
   int tindex;
   mtx_t mutex;
@@ -306,7 +307,13 @@ typedef struct{
 void treeQueueAdd(treeQueue *queue,stateTreeNode *node){
   mtx_lock(&queue->mutex);
   if(queue->tindex>=TREE_QUEUE_NODE_MAX_INDEX){
-	treeQueueNode *n=ALLOCATE_TREE_QUEUE_NODE;
+	treeQueueNode *n;
+	if(queue->blankPage){
+		n=queue->blankPage;
+		queue->blankPage=NULL;
+	}
+	else
+		n=ALLOCATE_TREE_QUEUE_NODE;
 	n->next=NULL;
 	queue->tail->next=n;
 	queue->tail=n;
@@ -331,12 +338,16 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
 	queue->head=hold->next;
 	queue->hindex=1;
 	out=queue->head->nodes[0];
-	mtx_unlock(&queue->mutex);
-	DEALLOCATE_TREE_QUEUE_NODE(hold);
+	if(!queue->blankPage){
+		queue->blankPage=hold;
+		printf("Thrown away\n");
+	}
+	else
+		DEALLOCATE_TREE_QUEUE_NODE(hold);
+	  mtx_unlock(&queue->mutex);
   }
   else{
-	out=queue->head->nodes[queue->hindex];
-	++queue->hindex;
+	out=queue->head->nodes[queue->hindex++];
 	mtx_unlock(&queue->mutex);
   }
   return out;
@@ -582,6 +593,10 @@ void solve(state in,int cleanup){
   	freeTree(&fromMixed);
   	DEALLOCATE_TREE_QUEUE_NODE(mixedQueue.head);
   	DEALLOCATE_TREE_QUEUE_NODE(solvedQueue.head);
+	if(mixedQueue.blankPage)
+		DEALLOCATE_TREE_QUEUE_NODE(mixedQueue.blankPage);
+	if(solvedQueue.blankPage)
+		DEALLOCATE_TREE_QUEUE_NODE(solvedQueue.blankPage);
   	mtx_destroy(&mixedQueue.mutex);
   	mtx_destroy(&solvedQueue.mutex);
   }
