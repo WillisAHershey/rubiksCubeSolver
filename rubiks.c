@@ -338,12 +338,11 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
 	queue->head=hold->next;
 	queue->hindex=1;
 	out=queue->head->nodes[0];
-	if(!queue->blankPage){
+	if(!queue->blankPage)
 		queue->blankPage=hold;
-		printf("Thrown away\n");
-	}
-	else
+	else{
 		DEALLOCATE_TREE_QUEUE_NODE(hold);
+	}
 	  mtx_unlock(&queue->mutex);
   }
   else{
