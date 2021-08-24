@@ -24,6 +24,15 @@
 #	include <threads.h>
 #endif
 
+#ifndef __STDC_NO_ATOMICS__
+#	include <stdatomic.h>
+#	if !ATOMIC_ADDRESS_LOCK_FREE
+#		define	RESPECT_MUTEX
+#	endif
+#else
+#	define	RESPECT_MUTEX
+#endif
+
 #define NUM_THREADS 8
 
 //enum color represents a mapping between the six colors of a Rubik's cube and integers 0-5
@@ -35,7 +44,9 @@ typedef struct{
   enum color c[48];
 }state;
 
+//Compares the two states referenced by the input pointers, and does not bother to compare anything before index tier
 //Returns tier where difference occurs times negative one if a<b, 0 if a=b, and positive tier where difference occurs if a>b. This allows us to order states
+//This return value nonsense helps quite a bit to optimize listMatch() (notice "tier" is index + 1)
 static inline int compareStates(state *a,state *b,int tier){
   for(int i=tier;i<48;++i)
 	if(a->c[i] != b->c[i])
@@ -234,7 +245,7 @@ state** addList(stateList *list,state *s){
   for(int tier=0;tier<48;++tier){
 	if(!pt->s[s->c[tier]]) 							//If the place where the state belongs in this tier is unoccupied, return it
 		return &pt->s[s->c[tier]];
-	int comp=compareStates(s,pt->s[s->c[tier]],tier); 			//Otherwise compare the state there to ours
+	int comp=compareStates(s,pt->s[s->c[tier]],tier); 			//Otherwise compare the state there to ours (Exact retval of compareStates is not useful in this function, only the sign)
 	if(!comp){ 								//If state is equal to current one in the list our state is a duplicate and we're done
 		mtx_unlock(&list->mutex);
 		return NULL; 							//Return NULL because it is a duplicate
@@ -304,6 +315,7 @@ void freeStateList(stateList *list){
 #	define DEALLOCATE_TREE_QUEUE_NODE(c) free(c)
 #	define TREE_QUEUE_NODE_MAX_INDEX ((16376-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
 #endif
+
 //A treeQueueNode is intended to occupy some arbitrary amount of memory, wasting only sizeof(void*) for linked-list-ness
 typedef struct treeQueueNodeStruct{
   struct treeQueueNodeStruct *next;
@@ -390,13 +402,19 @@ state listMatch(stateList *a,stateList *b){
 		if(bnode->s[bindex])
 			break;
 	while(aindex<6&&bindex<6){
-		int comp=compareStates(anode->s[aindex],bnode->s[bindex],0);	//The zero could be optimized I'm sure of it
+		int comp=compareStates(anode->s[aindex],bnode->s[bindex],asindex>bsindex?bsindex:asindex); //The logic of this function dictates that the difference cannot be before the smaller of asindex and bsindex
 		if(!comp){							//If comp is zero then the two states are equivalent and we've found a match
 			solutionFound=1;
+			printf("Solution found\n");
 			return *anode->s[aindex];
 		}
-		else if(comp<0){ 				//If comp < 0 it means the state in list a is less than the state in list b, so we move forward one in list a
-			if(anode->next[aindex]){		//If anode has a valid node pointer we have to explore it before we move on in this node, so we save in the stack
+		else if(comp<0){ 					//If comp < 0 it means the state in list a is less than the state in list b, so we move forward one in list a
+			if(asindex >= comp*-1){				//If the index where the difference is is less than the current tree depth, then we can skip that branch of the tree
+				asindex=(comp+1)*-1;			//This is the index in the state where the first difference was
+				aindex=bnode->s[bindex]->c[asindex]-1;	//This is the color right before the color that b has at the index where the difference occurred (will ++ in for loop)
+				anode=astack[asindex].node;		//Despite having jumped back any number of stackframes, we don't have to free anything because it's an array
+			}
+			else if(anode->next[aindex]){		//If anode has a valid node pointer we have to explore it before we move on in this node, so we save in the stack
 				astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
 				anode=anode->next[aindex];
 				aindex=-1;			//-1 will ++ to zero in the for loop below
@@ -413,7 +431,12 @@ state listMatch(stateList *a,stateList *b){
 			}
 		}
 		else{ 						//This means the state in list b is less than the state in list a, so we move forward one in list b
-			if(bnode->next[bindex]){
+			if(bsindex >= comp){			//This is pretty much a film negative of the code above
+				bsindex=comp-1;
+				bindex=anode->s[aindex]->c[bsindex]-1;
+				bnode=bstack[bsindex].node;
+			}
+			else if(bnode->next[bindex]){
 				bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
 				bnode=bnode->next[bindex];
 				bindex=-1;
