@@ -379,9 +379,9 @@ volatile static int solutionFound=0;
 state listMatch(stateList *a,stateList *b){
   //Arrays of stack structs are used instead of a linked list to prevent unnecessary malloc() free() overhead
   //This algorithm is basically begging to be implemented recursively, but the loop way is more memory friendly which is very important in this program
-  struct listStack{int index:3 ;stateListNode *node;} astack[48],bstack[48];	//We need stacks to search the lists because they're actually trees we need to traverse recursively
+  struct listStack{int index;stateListNode *node;} astack[48],bstack[48];	//We need stacks to search the lists because they're actually trees we need to traverse recursively
   while(!solutionFound){
-	int aindex:3=0,bindex:3=0,asindex:6=0,bsindex:6=0;				//Read a-index, b-index, a-stack-index, b-stack-index
+	int aindex=0,bindex=0,asindex=0,bsindex=0;				//Read a-index, b-index, a-stack-index, b-stack-index
 	stateListNode *anode=a->head,*bnode=b->head;				//Start at the heads of each tree
 	for(;aindex<6;++aindex)							//Find the first state saved in a
 		if(anode->s[aindex])
