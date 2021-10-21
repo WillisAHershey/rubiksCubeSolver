@@ -26,7 +26,8 @@
 
 //The following preprocessor directive allows the compiler to conditionally compile code for systems that
 //don't have atomic read/write access to pointers
-//This feature is here for listMatch(), which has never caused problems that I've noticed, but it theoretically could
+//This feature is here for listMatch(), which has never caused problems that I've noticed, but theoretically could
+/*
 #ifndef __STDC_NO_ATOMICS__
 #	include <stdatomic.h>
 #	if !ATOMIC_ADDRESS_LOCK_FREE
@@ -35,8 +36,8 @@
 #else
 #	define	RESPECT_MUTEX
 #endif
-
-#define NUM_THREADS 8
+*/
+#define NUM_THREADS 8 
 
 //enum color represents a mapping between the six colors of a Rubik's cube and integers 0-5
 //Notice that white and w are equivalent, as are blue and b etc.
@@ -52,9 +53,11 @@ typedef struct{
 //Returns tier where difference occurs times negative one if a<b, 0 if a=b, and positive tier where difference occurs if a>b. This allows us to order states
 //This return value nonsense helps quite a bit to optimize listMatch() (notice output 'tier' is index of difference + 1)
 static inline int compareStates(state *a,state *b,int tier){
+  if(tier<0)
+	tier=0;
   for(int i=tier;i<48;++i)
 	if(a->c[i] != b->c[i])
-		return a->c[i] < b->c[i] ? -1*(i+1) : i+1;
+		return a->c[i] < b->c[i] ? -(i+1) : i+1;
   return 0;
 }
 
@@ -63,24 +66,24 @@ void printState(state *in){
   printf("{");
   for(int c=0;c<48;++c){
 	switch(in->c[c]){
-	case white:
-		printf("w");
-		break;
-	case blue:
-		printf("b");
-		break;
-	case green:
-		printf("g");
-		break;
-	case yellow:
-		printf("y");
-		break;
-	case red:
-		printf("r");
-		break;
-	case orange:
-		printf("o");
-		break;
+		case white:
+			printf("w");
+			break;
+		case blue:
+			printf("b");
+			break;
+		case green:
+			printf("g");
+			break;
+		case yellow:
+			printf("y");
+			break;
+		case red:
+			printf("r");
+			break;
+		case orange:
+			printf("o");
+			break;
 	}
 	if(c!=47)
 		printf(",");
@@ -113,7 +116,7 @@ typedef struct stateTreeNodeStruct{
 
 //Node for m-ary tree of visited states
 typedef struct stateListNodeStruct{
-  state *s[6];
+  stateTreeNode *s[6];
   struct stateListNodeStruct *next[6];
 }stateListNode;
 
@@ -235,7 +238,7 @@ state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some i
 }
 
 //Returns a pointer to the place in the list where a pointer to the state should be stored, returns NULL if state is a duplicate.
-state** addList(stateList *list,state *s){
+stateTreeNode** addList(stateList *list,state *s){
 /*The state* that is passed to this function by buildTree() is a pointer to a temporary and contantly-changing memory location on the stack of the calling thread,
   so saving that pointer in the list would be #verybad. A permament home for the state is also not made until this function confirms it is not a duplicate.
   To remedy this problem this function behaves in a rather unorthidox way. If the state is found to be a duplicate, the mutex is unlocked, and NULL is returned.
@@ -246,10 +249,10 @@ state** addList(stateList *list,state *s){
   */
   mtx_lock(&list->mutex);
   stateListNode *pt=list->head;							//A stateList is simultaneously a tree and an ordered linked list. See the definitions of stateList ansd stateListNode above
-  for(int tier=0;tier<48;++tier){
+  for(int tier=0;tier<48;++tier){						//Because of the design of the cube itself this tree cannot be more than 48-deep
 	if(!pt->s[s->c[tier]]) 							//If the place where the state belongs in this tier is unoccupied, return it
 		return &pt->s[s->c[tier]];
-	int comp=compareStates(s,pt->s[s->c[tier]],tier); 			//Otherwise compare the state there to ours (Exact retval of compareStates is not useful in this function, only the sign)
+	int comp=compareStates(s,&pt->s[s->c[tier]]->s,tier); 			//Otherwise compare the state in the treenode there to ours (Exact retval of compareStates is not useful in this function, only the sign)
 	if(!comp){ 								//If state is equal to current one in the list our state is a duplicate and we're done
 		mtx_unlock(&list->mutex);
 		return NULL; 							//Return NULL because it is a duplicate
@@ -261,30 +264,30 @@ state** addList(stateList *list,state *s){
 			stateListNode *newNode=malloc(sizeof(stateListNode));
 			memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
 			pt->next[s->c[tier]]=newNode;
-			return &pt->next[s->c[tier]]->s[s->c[tier+1]];		//listMatch() does not respect the mutexes of the stateList, so it is very important the new node is cleared
-		}								//before it is connected to the rest of the tree
+			return &pt->next[s->c[tier]]->s[s->c[tier+1]];
+		}
 	}
 	else{ 									//If state is less than current one in the list
-		state **out=&pt->s[s->c[tier]]; 				//This is what we will return, but first we have to find a home for the state we displaced
-		state *push=pt->s[s->c[tier]];					//And save the state pointer that's there because we have to find it a new home
-		while(pt->next[push->c[tier]]){ 				//We push it down the tree. This loop breaks when we run out of tree
-			pt=pt->next[push->c[tier]];
+		stateTreeNode **out=&pt->s[s->c[tier]]; 			//This is what we will return, but first we have to find a home for the state we displaced
+		stateTreeNode *push=pt->s[s->c[tier]];				//And save the state pointer that's there because we have to find it a new home
+		while(pt->next[push->s.c[tier]]){ 				//We push it down the tree. This loop breaks when we run out of tree
+			pt=pt->next[push->s.c[tier]];
 			++tier;
-			if(!pt->s[push->c[tier]]){				//If the spot where the state we're pushing belongs is unoccupied put it there and we're done
-				pt->s[push->c[tier]]=push;
+			if(!pt->s[push->s.c[tier]]){				//If the spot where the state we're pushing belongs is unoccupied put it there and we're done
+				pt->s[push->s.c[tier]]=push;
 				return out;
 			}
 			else{							//Otherwise swap out the state that's there with push and push it instead
-				state *hold=pt->s[push->c[tier]];
-				pt->s[push->c[tier]]=push;
+				stateTreeNode *hold=pt->s[push->s.c[tier]];
+				pt->s[push->s.c[tier]]=push;
 				push=hold;
 			}
 		}
 		stateListNode *newNode=malloc(sizeof(stateListNode));		//If we run out of tree we make more tree and return a pointer to the proper spot in it
 		memcpy(newNode,&emptyStateListNode,sizeof(stateListNode));
-		pt->next[push->c[tier]]=newNode;
-		pt->next[push->c[tier]]->s[push->c[tier+1]]=push;
-		return out;							//We do not change the value of the state* before we return it because listMatch() does not respect the mutexes
+		pt->next[push->s.c[tier]]=newNode;
+		pt->next[push->s.c[tier]]->s[push->s.c[tier+1]]=push;
+		return out;							//We do not change the value of the state* before we return it because listMatch() does not always respect the mutexes
 	}
   }
   //If this is reached, it means that the list has no duplicate of this state, and there is also no place in the list to put it, which should be impossible
@@ -313,11 +316,11 @@ void freeStateList(stateList *list){
 #	include <sys/mman.h>
 #	define ALLOCATE_TREE_QUEUE_NODE mmap(NULL,4*sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0)
 #	define DEALLOCATE_TREE_QUEUE_NODE(c) munmap(c,4*sysconf(_SC_PAGE_SIZE))
-#	define TREE_QUEUE_NODE_MAX_INDEX ((4*sysconf(_SC_PAGE_SIZE)-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
+#	define TREE_QUEUE_NODE_CAPACITY ((4*sysconf(_SC_PAGE_SIZE)-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
 #else
 #	define ALLOCATE_TREE_QUEUE_NODE malloc(16376)
 #	define DEALLOCATE_TREE_QUEUE_NODE(c) free(c)
-#	define TREE_QUEUE_NODE_MAX_INDEX ((16376-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
+#	define TREE_QUEUE_NODE_CAPACITY ((16376-sizeof(stateTreeNode*))/sizeof(stateTreeNode*))
 #endif
 
 //A treeQueueNode is intended to occupy some arbitrary amount of memory, wasting only sizeof(void*) for linked-list-ness
@@ -326,176 +329,286 @@ typedef struct treeQueueNodeStruct{
   stateTreeNode *nodes[];
 }treeQueueNode;
 
-//Thread-safe struct for queue with head and tail pointers to treeQueueNodes, values for head index and tail index, and a mutex
+//Thread-safe struct for bfs queue
+//treeQueueAdd() mantains two queues, one with states of the current tier and one of the states of the next tier
+//this is so race-conditions cannot cause us to process a higher tier node before all lower tiers are processed
 typedef struct{
   treeQueueNode *head;
   treeQueueNode *tail;
-  void *blankPage;
-  int hindex;
-  int tindex;
+  treeQueueNode *newHead;
+  treeQueueNode *newTail;
+  treeQueueNode *blankPage;
+  unsigned int hindex;
+  unsigned int tindex;
+  unsigned int newIndex;
   mtx_t mutex;
 }treeQueue;
 
 //Adds a stateTreeNode* to a valid treeQueue. Most likely segfaults on memory allocation failure
 void treeQueueAdd(treeQueue *queue,stateTreeNode *node){
+  treeQueueNode **applicableTail;				//applicableTail/Tindex allow us to run the same code regardles of which queue we're filling
+  unsigned int *applicableTindex;
   mtx_lock(&queue->mutex);
-  if(queue->tindex>=TREE_QUEUE_NODE_MAX_INDEX){
-	treeQueueNode *n;
-	if(queue->blankPage){			//Recycle old treeQueueNode if one is available (should happen about 1/15 of the time)
-		n=queue->blankPage;
+  if(queue->head==queue->tail&&queue->hindex==queue->tindex){	//Main queue is empty
+	if(queue->newHead==queue->newTail&&queue->newIndex==0){	//Secondary queue is also empty
+		queue->hindex=0;
+		queue->tindex=1;
+		queue->tail->nodes[0]=node;
+		mtx_unlock(&queue->mutex);
+		return;
+	}
+	else{							//Swap the queues
+		treeQueueNode *hold=queue->head;
+		queue->head=queue->newHead;
+		queue->tail=queue->newTail;
+		queue->hindex=0;
+		queue->tindex=queue->newIndex;
+		queue->newIndex=0;
+		queue->newHead=queue->newTail=hold;
+		applicableTail=&queue->tail;
+		applicableTindex=&queue->tindex;
+	}
+  }
+  if(node->tier > queue->head->nodes[queue->hindex]->tier){
+	applicableTail=&queue->newTail;
+	applicableTindex=&queue->newIndex;
+  }
+  else{
+	applicableTail=&queue->tail;
+	applicableTindex=&queue->tindex;
+  }
+  if(*applicableTindex == TREE_QUEUE_NODE_CAPACITY-1){			//Checking for the value before the one that causes a problem does two things to our benefit
+	(*applicableTail)->nodes[TREE_QUEUE_NODE_CAPACITY-1]=node;	//1) It ensures that we don't miss a rare case where the queue is empty while tindex is 0 and hindex is max and therefore !=
+	if(queue->blankPage){						//2) It ensures that treeQueueAdd() doesn't segfault when it checks the tier of the node at head
+		(*applicableTail)->next=queue->blankPage;
+		*applicableTail=queue->blankPage;
 		queue->blankPage=NULL;
 	}
-	else
-		n=ALLOCATE_TREE_QUEUE_NODE;
-	n->next=NULL;
-	queue->tail->next=n;
-	queue->tail=n;
-	queue->tindex=0;
+	else{
+		treeQueueNode *n=ALLOCATE_TREE_QUEUE_NODE;
+		(*applicableTail)->next=n;
+		*applicableTail=n;
+	}
+	*applicableTindex=0;
   }
-  queue->tail->nodes[queue->tindex]=node;
-  ++queue->tindex;
+  else
+  	(*applicableTail)->nodes[(*applicableTindex)++]=node;
   mtx_unlock(&queue->mutex);
 }
 
 //Removes a stateTreeNode* from a valid treeQueue. Returns NULL when the queue is empty
 stateTreeNode* treeQueueRemove(treeQueue *queue){
   mtx_lock(&queue->mutex);
-  stateTreeNode *out;
-  if(queue->tail==queue->head&&queue->hindex>=queue->tindex){
-	queue->hindex=queue->tindex=0; //If the queue is empty, and the indices are some arbitrary value, we can simply start back at 0 to save overhead
-	mtx_unlock(&queue->mutex);
-	out=NULL;
-  }
-  else if(queue->hindex>=TREE_QUEUE_NODE_MAX_INDEX){
-	treeQueueNode *hold=queue->head;
-	queue->head=hold->next;
-	queue->hindex=1;
-	out=queue->head->nodes[0];
-	if(!queue->blankPage)		//While the tree is still being built this should always evaluate to true because queue grows about 15 times the speed it is depleted
-		queue->blankPage=hold;
-	else{
-		DEALLOCATE_TREE_QUEUE_NODE(hold);
+  if(queue->head==queue->tail&&queue->hindex==queue->tindex){
+	if(queue->newHead==queue->newTail&&queue->newIndex==0){
+		mtx_unlock(&queue->mutex);
+		return NULL;
 	}
-	  mtx_unlock(&queue->mutex);
+	else{
+		treeQueueNode *hold=queue->head;
+		queue->head=queue->newHead;
+		queue->tail=queue->newTail;
+		queue->hindex=0;
+		queue->tindex=queue->newIndex;
+		queue->newIndex=0;
+		queue->newHead=queue->newTail=hold;
+	}
   }
-  else{
-	out=queue->head->nodes[queue->hindex++];
-	mtx_unlock(&queue->mutex);
+  stateTreeNode *out;
+  if(queue->hindex == TREE_QUEUE_NODE_CAPACITY-1){
+	out=queue->head->nodes[TREE_QUEUE_NODE_CAPACITY-1];
+	treeQueueNode *hold=queue->head->next;
+	if(!queue->blankPage)
+		queue->blankPage=queue->head;
+	else
+		DEALLOCATE_TREE_QUEUE_NODE(queue->head);
+	queue->head=hold;
+	queue->hindex=0;
   }
+  else
+  	out=queue->head->nodes[queue->hindex++];
+  mtx_unlock(&queue->mutex);
   return out;
 }
 
 //This global variable functions as a signal to all threads to stop making new nodes
 //I kinda hate global varibales, tho, so there's a good chance I'll replace this mechanism with actual signals someday
-volatile static int solutionFound=0;
+static volatile int solutionFound=0;
 
 //This function compares two stateLists in a loop until a state is found that is present in both lists. When that duplicate state is found, it is returned
-//This function does not respect the mutexes of the lists because it does not modify them, so it is very important that the other functions that do initialize the
-//memory before it is placed in the list. I wonder if atomicity could possibly be a problem here...
 state listMatch(stateList *a,stateList *b){
-  //Arrays of stack structs are used instead of a linked list to prevent unnecessary malloc() free() overhead
-  //This algorithm is basically begging to be implemented recursively, but the loop way is more memory friendly which is very important in this program
-  struct listStack{int index;stateListNode *node;} astack[48],bstack[48];	//We need stacks to search the lists because they're actually trees we need to traverse recursively
+  struct solutionS{state *s; int tier;} solution = (struct solutionS){.s=NULL,.tier=-1};
   while(!solutionFound){
-	int aindex=0,bindex=0,asindex=0,bsindex=0;				//Read a-index, b-index, a-stack-index, b-stack-index
-	stateListNode *anode=a->head,*bnode=b->head;				//Start at the heads of each tree
+	struct listStack{int index; stateListNode *node;} astack[48],bstack[48];
+	int aindex=0,bindex=0,asindex=0,bsindex=0;
+	stateListNode *anode=a->head,*bnode=b->head;
 	state *astate=NULL,*bstate=NULL;
+	int comparisons = 0;
 #ifdef RESPECT_MUTEX
 	mtx_lock(&a->mutex);
 #endif
-	for(;aindex<6;++aindex)							//Find the first state saved in a
+	for(;aindex<6;++aindex)
 		if(anode->s[aindex]){
-			astate=anode->s[aindex];
+			astate=&anode->s[aindex]->s;
 			break;
 		}
 #ifdef RESPECT_MUTEX
 	mtx_unlock(&a->mutex);
 	mtx_lock(&b->mutex);
 #endif
-	for(;bindex<6;++bindex)							//And the first state saved in b
+	for(;bindex<6;++bindex)
 		if(bnode->s[bindex]){
-			bstate=bnode->s[bindex];
+			bstate=&bnode->s[bindex]->s;
 			break;
 		}
-
 #ifdef RESPECT_MUTEX
 	mtx_unlock(&b->mutex);
 #endif
 	while(aindex<6&&bindex<6){
-		int comp=compareStates(astate,bstate,asindex>bsindex?bsindex:asindex); //The logic of this function dictates that the difference cannot be before the smaller of asindex and bsindex
-		if(!comp){							//If comp is zero then the two states are equivalent and we've found a match
-			solutionFound=1;
-			printf("Solution found\n");
-			return *anode->s[aindex];
-		}
-		else if(comp<0){					//If comp < 0 it means the state in list a is less than the state in list b, so we move forward one in list a
+		int comp=compareStates(astate,bstate,asindex<bsindex?asindex:bsindex);
+		++comparisons;
+		if(!comp){										//If the two states do in fact match
 #ifdef RESPECT_MUTEX
-			mtx_lock(&a->mutex);
+			mtx_lock(&a->mutex);								//Both paths of if(!comp) need both mutexes just to compute combined tier
+			mtx_lock(&b->mutex);
 #endif
-			if(asindex >= comp*-1){				//If the index where the difference is is less than the current tree depth, then we can skip that branch of the tree
-				asindex=(comp+1)*-1;			//This is the index in the state where the first difference was
-				aindex=bstate->c[asindex]-1;		//This is the color right before the color that b has at the index where the difference occurred (will ++ in for loop)
-				anode=astack[asindex].node;		//Despite having jumped back any number of stackframes, we don't have to free anything because it's an array
-			}
-			else if(anode->next[aindex]){			//If anode has a valid node pointer we have to explore it before we move on in this node, so we save in the stack
-				astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
-				anode=anode->next[aindex];
-				aindex=-1;				//-1 will ++ to zero in the for loop below
-			}
-			for(++aindex;aindex<6;++aindex)
-				if(anode->s[aindex]){
-					astate=anode->s[aindex];
-					break;
-				}
-			while(aindex==6&&asindex>0){		//Pop from the stack if necessary to find a new state to compare to b
-				aindex=astack[--asindex].index;
-				anode=astack[asindex].node;
-				for(++aindex;aindex<6;++aindex)
+			if(!solutionFound){								//If this is the first match we've found
+				solutionFound=1;							//Tell the threads to stop building the stateTrees
+				printf("Solution found\n");
+				solution = (struct solutionS){.s = astate,.tier = anode->s[aindex]->tier + bnode->s[bindex]->tier};
+				aindex=bindex=asindex=bsindex=0;					//Restart listMatch at the beginning of both stateLists so we can find all matches
+				anode=a->head;
+				bnode=b->head;
+
+				for(;aindex<6;++aindex)							//Find first state of both lists
 					if(anode->s[aindex]){
-						astate=anode->s[aindex];
+						astate=&anode->s[aindex]->s;
+						break;
+					}
+
+				for(;bindex<6;++bindex)
+					if(bnode->s[bindex]){
+						bstate=&bnode->s[bindex]->s;
 						break;
 					}
 			}
+			else{										//If this is not the first match we've found, ignore it unless the combined tier is lower
+				if(anode->s[aindex]->tier + bnode->s[bindex]->tier < solution.tier)
+					solution = (struct solutionS){.s = astate,.tier = anode->s[aindex]->tier + bnode->s[bindex]->tier};
+				if(anode->next[aindex]){						//But either way move both astate and bstate exactly one state forward
+					astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
+					anode=anode->next[aindex];
+					aindex = -1;							//will ++ to 0
+				}
+				for(++aindex;aindex<6;++aindex)
+					if(anode->s[aindex])
+						break;
+				while(aindex==6&&asindex>0){
+					--asindex;
+					anode=astack[asindex].node;
+					aindex=astack[asindex].index;
+					for(++aindex;aindex<6;++aindex)
+						if(anode->s[aindex])
+							break;
+				}
+				astate = &anode->s[aindex]->s;
+				
+				if(bnode->next[bindex]){
+					bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
+					bnode=bnode->next[bindex];
+					bindex = -1;
+				}
+				for(++bindex;bindex<6;++bindex)
+					if(bnode->s[bindex])
+						break;
+				while(bindex==6&&bsindex>0){
+					--bsindex;
+					bnode=bstack[bsindex].node;
+					bindex=bstack[bsindex].index;
+					for(++bindex;bindex<6;++bindex)
+						if(bnode->s[bindex])
+							break;
+				}
+				bstate = &bnode->s[bindex]->s;							//If this is a pointer to an oob element, the loop will break before it is dereferenced
+			}
+#ifdef RESPECT_MUTEX
+			mtx_unlock(&a->mutex);									//and we must give them both back
+			mtx_unlock(&b->mutex);
+#endif
+		}
+		else if(comp<0){										//If astate is less than bstate
+			comp*=-1;	//Make comp positive
+			if(comp <= asindex)									//If tier of difference is less than current working tier
+				anode=astack[(asindex = comp-1)].node;						//Pop from stack
+			aindex=bstate->c[asindex];								//Slide index to the value in b's state at the place where the difference occurred
+#ifdef RESPECT_MUTEX
+			mtx_lock(&a->mutex);
+#endif
+			if(anode->next[aindex]){
+				comp=compareStates(bstate,&anode->s[aindex]->s,asindex);
+				++comparisons;
+				while(asindex<comp&&anode->next[aindex]){
+					astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
+					anode=anode->next[aindex];
+					aindex=bstate->c[asindex];
+				}
+			}
+			if(!anode->s[aindex]||astate==&anode->s[aindex]->s){
+				for(++aindex;aindex<6;++aindex)
+					if(anode->s[aindex])
+						break;
+				while(aindex==6&&asindex>0){
+					--asindex;
+					anode=astack[asindex].node;
+					aindex=astack[asindex].index;
+					for(++aindex;aindex<6;++aindex)
+						if(anode->s[aindex])
+							break;
+				}
+			}
+			astate=&anode->s[aindex]->s;								//If this is a pointer to an oob element, the loop will break before it is dereferenced
 #ifdef RESPECT_MUTEX
 			mtx_unlock(&a->mutex);
 #endif
 		}
-		else{ 						//This means the state in list b is less than the state in list a, so we move forward one in list b
+		else{
+			if(comp <= bsindex)
+				bnode=bstack[(bsindex = comp-1)].node;
+			bindex=astate->c[bsindex];
 #ifdef RESPECT_MUTEX
 			mtx_lock(&b->mutex);
 #endif
-			if(bsindex >= comp){			//This is pretty much a film negative of the code above
-				bsindex=comp-1;
-				bindex=astate->c[bsindex]-1;
-				bnode=bstack[bsindex].node;
-			}
-			else if(bnode->next[bindex]){
-				bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
-				bnode=bnode->next[bindex];
-				bindex=-1;
-			}
-			for(++bindex;bindex<6;++bindex)
-				if(bnode->s[bindex]){
-					bstate=bnode->s[bindex];
-					break;
+			if(bnode->s[bindex]){
+				comp=compareStates(astate,&bnode->s[bindex]->s,bsindex);
+				++comparisons;
+				while(bsindex<comp&&bnode->next[bindex]){
+					bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
+					bnode=bnode->next[bindex];
+					bindex=astate->c[bsindex];
 				}
-			while(bindex==6&&bsindex>0){
-				bindex=bstack[--bsindex].index;
-				bnode=bstack[bsindex].node;
-				for(++bindex;bindex<6;++bindex)
-					if(bnode->s[bindex]){
-						bstate=bnode->s[bindex];
-						break;
-					}
 			}
+			if(!bnode->s[bindex]||bstate==&bnode->s[bindex]->s){
+				for(++bindex;bindex<6;++bindex)
+					if(bnode->s[bindex])
+						break;
+				while(bindex==6&&bsindex>0){
+					--bsindex;
+					bnode=bstack[bsindex].node;
+					bindex=bstack[bsindex].index;
+					for(++bindex;bindex<6;++bindex)
+						if(bnode->s[bindex])
+							break;
+				}
+			}
+			bstate=&bnode->s[bindex]->s;								//If this is a pointer to an oob element the loop will break before it is dereferenced
 #ifdef RESPECT_MUTEX
 			mtx_unlock(&b->mutex);
 #endif
 		}
 	}
+	printf("Loop %d\n",comparisons);
   }
-  //This can't happen, but the compiler requires a valid retval here because it doesn't know that
-  return solved;
+  return *solution.s;												//This is the intersection state of the trees with the lowest average depth
 }
 
 //This is the struct to hold the data a thread needs to perform the buildTree function properly.
@@ -528,21 +641,21 @@ THREAD_RETURN buildTree(void *data){
 		}
 		state hold;
 		(transformations[c])(node->s,&hold);				//Mutate the state and compare it to the list
-		state **listSlip;
+		stateTreeNode **listSlip;
 		if((listSlip=addList(list,&hold))){				//We found a new unvisited state so we must add it to the stateList
 			node->children[c]=malloc(sizeof(stateTreeNode));
-			node->children[c]->s=hold;				//This must be initialized
-			*listSlip=&node->children[c]->s;			//before connecting to the list
-			mtx_unlock(&list->mutex);
+			node->children[c]->s=hold;				//State and tier must be initialized before connecting to the list
 			node->children[c]->tier=node->tier+1;
-			node->children[c]->side=c/3;
+			*listSlip=node->children[c];
+			mtx_unlock(&list->mutex);
+			node->children[c]->side=c/3;				//listMatch doesn't care about side, so we can do this after it has access
 			treeQueueAdd(queue,node->children[c]);
 		}
 		else								//This state is a duplicate
 			node->children[c]=NULL;
 	}
   }
-//The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree
+  //The pointers in all the nodes in the queue were left uninitialized, so they must be made NULL before search is done on the tree
   stateTreeNode *node;
   while((node=treeQueueRemove(queue)))	//This breaks when treeQueueRemove returns NULL, which happens when the queue is exhausted
 	memcpy(node->children,eightteenNulls,sizeof eightteenNulls);
@@ -623,36 +736,38 @@ void solve(state in,int cleanup){
   stateList mixedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(mixedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&mixedList.mutex,mtx_plain);
-  *addList(&mixedList,&fromMixed.s)=&fromMixed.s; //The list is empty to we assume it will not return NULL
+  *addList(&mixedList,&fromMixed.s)=&fromMixed; //The list is empty to we assume it will not return NULL
   mtx_unlock(&mixedList.mutex); //When addList() doesn't return NULL we must unlock the mutex
   //The stateList is set up for the solved tree, with the solved state as the only state
   stateList solvedList=(stateList){.head=malloc(sizeof(stateListNode))};
   memcpy(solvedList.head,&emptyStateListNode,sizeof(stateListNode));
   mtx_init(&solvedList.mutex,mtx_plain);
-  *addList(&solvedList,&fromSolved.s)=&fromSolved.s; //The list is empty, so we assume it will not return NULL
+  *addList(&solvedList,&fromSolved.s)=&fromSolved; //The list is empty, so we assume it will not return NULL
   mtx_unlock(&solvedList.mutex); //When addList() doesn't return NULL we must unlock the mutex
   //Queue for running BFS on the mixed stateTree is set up with the first node of the tree as the only node in the queue
   treeQueue mixedQueue;
   mixedQueue.head=mixedQueue.tail=ALLOCATE_TREE_QUEUE_NODE;
-  mixedQueue.hindex=mixedQueue.tindex=0;
+  mixedQueue.newHead=mixedQueue.newTail=ALLOCATE_TREE_QUEUE_NODE;
+  mixedQueue.hindex=mixedQueue.tindex=mixedQueue.newIndex=0;
+  mixedQueue.tail->nodes[mixedQueue.tindex++]=&fromMixed;
   mixedQueue.blankPage=NULL;
   mtx_init(&mixedQueue.mutex,mtx_plain);
-  treeQueueAdd(&mixedQueue,&fromMixed);
   //Queue for running BFS on the solved stateTree is set up with the first node of the tree as the only node in the queue
   treeQueue solvedQueue;
   solvedQueue.head=solvedQueue.tail=ALLOCATE_TREE_QUEUE_NODE;
-  solvedQueue.hindex=solvedQueue.tindex=0;
+  solvedQueue.newHead=solvedQueue.newTail=ALLOCATE_TREE_QUEUE_NODE;
+  solvedQueue.hindex=solvedQueue.tindex=solvedQueue.newIndex=0;
+  solvedQueue.tail->nodes[solvedQueue.tindex++]=&fromSolved;
   solvedQueue.blankPage=NULL;
   mtx_init(&solvedQueue.mutex,mtx_plain);
-  treeQueueAdd(&solvedQueue,&fromSolved);
   //Produces NUM_THREADS or NUM_THREADS+1 threads, half of which work on the shuffled tree, and half of which work on the solved tree
-  thrd_t tids[NUM_THREADS+1];															{ //Limiting the scope of int c from here
+  thrd_t tids[NUM_THREADS+1];															{ //Limiting the scope of int c, state link, and char *string from here...
   int c;
   for(c=0;c<NUM_THREADS;c+=2){
-    thrd_create(&tids[c],buildTree,&(buildTreeData){.list=&mixedList,.queue=&mixedQueue});	//Implicit compound literals are used instead of explicit stack structs
-    thrd_create(&tids[c+1],buildTree,&(buildTreeData){.list=&solvedList,.queue=&solvedQueue});
+    thrd_create(&tids[c],buildTree,(void*)&(const buildTreeData){.list=&mixedList,.queue=&mixedQueue});	//Implicit compound literals are used instead of explicit stack structs
+    thrd_create(&tids[c+1],buildTree,(void*)&(const buildTreeData){.list=&solvedList,.queue=&solvedQueue}); //Making them const tells the compiler that they don't all need their own copy
   }
-  //Control blocks here until a match is found in the two stateLists
+  //Control blocks here until a match is found in the two stateLists, and then continues to block until listMatch ensures that it's found the best match
   state link=listMatch(&mixedList,&solvedList);
   //When a match is found, the threads work together to set all the pointers at the bottom of the trees to NULL, before terminating, and being joined here
   for(--c;c>-1;--c)
@@ -666,7 +781,7 @@ void solve(state in,int cleanup){
 	printf("%s\n",string);
 	free(string);
 	backwardsSearchTree(&fromSolved,&link);
-  }																		} // to here
+  }																		} // ...to here
   //This is all cleanup and is unnecessary if the program is being torn down right now
   //It is up to the calling function to ensure that if several cubes are being solved in one run, that cleanup should really be done between cubes
   if(cleanup){
