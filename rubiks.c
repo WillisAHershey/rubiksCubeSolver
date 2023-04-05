@@ -37,7 +37,7 @@
 #	define	RESPECT_MUTEX
 #endif
 */
-#define NUM_THREADS 8 
+#define NUM_THREADS 16 
 
 //enum color represents a mapping between the six colors of a Rubik's cube and integers 0-5
 //Notice that white and w are equivalent, as are blue and b etc.
@@ -214,7 +214,7 @@ void bottomTwice(state in,state *out){
 void (*const transformations[])(state,state*)={faceClock,faceCounter,faceTwice,leftClock,leftCounter,leftTwice,rightClock,rightCounter,rightTwice,rearClock,rearCounter,rearTwice,topClock,topCounter,topTwice,bottomClock,bottomCounter,bottomTwice};
 
 //String descriptions of the transformations in the array of function pointers are stored here in the same order for simplicity and rhyme/reason's sake
-const char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right Twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
+const char *descriptions[]={"Face clockwise","Face counter-clockwise","Face twice","Left clockwise","Left counter-clockwise","Left twice","Right clockwise","Right counter-clockwise","Right twice","Rear clockwise","Rear counter-clockwise","Rear twice","Top clockwise","Top counter-clockwise","Top twice","Bottom clockwise","Bottom counter-clockwise","Bottom twice"};
 
 state shuffle(int in,int verbose){ //Performs a random virtual shuffle of some input number of moves upon the solved state and returns the shuffled state
   static int seed=0;
@@ -253,7 +253,7 @@ stateTreeNode** addList(stateList *list,state *s){
 	if(!pt->s[s->c[tier]]) 							//If the place where the state belongs in this tier is unoccupied, return it
 		return &pt->s[s->c[tier]];
 	int comp=compareStates(s,&pt->s[s->c[tier]]->s,tier); 			//Otherwise compare the state in the treenode there to ours (Exact retval of compareStates is not useful in this function, only the sign)
-	if(!comp){ 								//If state is equal to current one in the list our state is a duplicate and we're done
+	if(!comp){ 								//If state is equal to current one in the list our state is a duplicate and we're done		
 		mtx_unlock(&list->mutex);
 		return NULL; 							//Return NULL because it is a duplicate
 	}
@@ -421,8 +421,8 @@ stateTreeNode* treeQueueRemove(treeQueue *queue){
 	if(!queue->blankPage)
 		queue->blankPage=queue->head;
 	else
-		DEALLOCATE_TREE_QUEUE_NODE(queue->head);
-	queue->head=hold;
+		DEALLOCATE_TREE_QUEUE_NODE(queue->head);		//tree queue nodes should really only get deallocated once a solution is found
+	queue->head=hold;						//because the tree grows much faster than it is depleated
 	queue->hindex=0;
   }
   else
@@ -443,7 +443,6 @@ state listMatch(stateList *a,stateList *b){
 	int aindex=0,bindex=0,asindex=0,bsindex=0;
 	stateListNode *anode=a->head,*bnode=b->head;
 	state *astate=NULL,*bstate=NULL;
-	int comparisons = 0;
 #ifdef RESPECT_MUTEX
 	mtx_lock(&a->mutex);
 #endif
@@ -466,7 +465,6 @@ state listMatch(stateList *a,stateList *b){
 #endif
 	while(aindex<6&&bindex<6){
 		int comp=compareStates(astate,bstate,asindex<bsindex?asindex:bsindex);
-		++comparisons;
 		if(!comp){										//If the two states do in fact match
 #ifdef RESPECT_MUTEX
 			mtx_lock(&a->mutex);								//Both paths of if(!comp) need both mutexes just to compute combined tier
@@ -546,7 +544,6 @@ state listMatch(stateList *a,stateList *b){
 #endif
 			if(anode->next[aindex]){
 				comp=compareStates(bstate,&anode->s[aindex]->s,asindex);
-				++comparisons;
 				while(asindex<comp&&anode->next[aindex]){
 					astack[asindex++]=(struct listStack){.index=aindex,.node=anode};
 					anode=anode->next[aindex];
@@ -580,7 +577,6 @@ state listMatch(stateList *a,stateList *b){
 #endif
 			if(bnode->s[bindex]){
 				comp=compareStates(astate,&bnode->s[bindex]->s,bsindex);
-				++comparisons;
 				while(bsindex<comp&&bnode->next[bindex]){
 					bstack[bsindex++]=(struct listStack){.index=bindex,.node=bnode};
 					bnode=bnode->next[bindex];
@@ -606,7 +602,6 @@ state listMatch(stateList *a,stateList *b){
 #endif
 		}
 	}
-	printf("Loop %d\n",comparisons);
   }
   return *solution.s;												//This is the intersection state of the trees with the lowest average depth
 }
